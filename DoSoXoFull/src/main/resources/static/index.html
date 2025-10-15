@@ -1,0 +1,263 @@
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Dò số - Xổ số thông minh</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <style>
+        .form-mini .form-label,
+        .form-mini .form-control,
+        .form-mini .form-select {
+            font-size: 0.875rem;
+            padding: 0.25rem 0.5rem;
+        }
+    </style>
+</head>
+<body class="bg-light">
+<div class="container py-3">
+    <h3 class="text-center mb-3">🎯 Dò Số Xổ Số 3 Miền</h3>
+
+    <form id="form-do-so" class="row g-2 form-mini">
+        <div class="col-md-2" id="so-danh-field">
+            <label class="form-label">Số đánh</label>
+            <input type="text" class="form-control" name="soDanh" required>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Cách đánh</label>
+            <select class="form-select" name="cachDanh" required>
+                <option value="2 chân">2 CHÂN</option>
+                <option value="3 chân">3 CHÂN</option>
+                <option value="đầu">ĐẦU</option>
+                <option value="đuôi">ĐUÔI</option>
+                <option value="lớn">LỚN</option>
+                <option value="nhỏ">NHỎ</option>
+                <option value="đầu đuôi">ĐẦU ĐUÔI</option>
+                <option value="xuyên 2">XUYÊN 2</option>
+                <option value="xuyên 3">XUYÊN 3</option>
+                <option value="xuyên 4">XUYÊN 4</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Miền</label>
+            <select class="form-select" name="mien" required>
+                <option value="">--Chọn--</option>
+                <option>MIỀN BẮC</option>
+                <option>MIỀN TRUNG</option>
+                <option>MIỀN NAM</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Tên đài (tuỳ chọn)</label>
+            <input type="text" class="form-control" name="tenDai" placeholder="VD: HCM, LA, 3 ĐÀI">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Ngày</label>
+            <input type="date" class="form-control" name="ngay" required>
+        </div>
+
+        <div class="col-md-2" id="tien-danh-field">
+            <label class="form-label">Tiền đánh</label>
+            <input type="number" class="form-control" name="tienDanh" min="1">
+        </div>
+
+        <div id="nhieu-tien-3chan" class="row d-none">
+            <div class="col-md-2">
+                <label class="form-label">Tiền bao lô</label>
+                <input type="number" class="form-control" name="tienBaoLo" min="0">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Tiền Thưởng</label>
+                <input type="number" class="form-control" name="tienThuong" min="0">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Tiền Đặc biệt</label>
+                <input type="number" class="form-control" name="tienDacBiet" min="0">
+            </div>
+        </div>
+
+        <div class="col-12 text-center">
+            <button type="submit" class="btn btn-primary px-4">🔍 Dò số</button>
+        </div>
+    </form>
+
+    <hr>
+
+    <div id="ket-qua" class="mt-3"></div>
+
+    <h4 class="mt-4 text-center">📋 Kết Quả Xổ Số Theo Ngày</h4>
+    <div class="row justify-content-center mb-2">
+        <div class="col-md-3">
+            <input type="date" id="ngay-ketqua" class="form-control" placeholder="Chọn ngày">
+        </div>
+        <div class="col-md-2">
+            <select id="mien-loc" class="form-select">
+                <option value="">Tất cả miền</option>
+                <option>MIỀN BẮC</option>
+                <option>MIỀN TRUNG</option>
+                <option>MIỀN NAM</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <input type="text" id="dai-loc" class="form-control" placeholder="Tên đài (tuỳ chọn)">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-secondary w-100" onclick="taiKetQuaXoSoTheoNgay()">📋 Xem Kết Quả</button>
+        </div>
+    </div>
+
+    <div id="bang-ket-qua-3mien" class="table-responsive mt-2"></div>
+</div>
+
+<script>
+    const form = document.getElementById('form-do-so');
+    const cachDanhSelect = form.querySelector('[name="cachDanh"]');
+    const tienDanhField = document.getElementById('tien-danh-field');
+    const nhieuTienDiv = document.getElementById('nhieu-tien-3chan');
+    const soDanhInput = form.querySelector('[name="soDanh"]');
+
+    // Ẩn/hiện các trường tuỳ theo cách đánh
+    function updateFormFields() {
+        const value = cachDanhSelect.value.toLowerCase();
+
+        if (value === '3 chân') {
+            tienDanhField.classList.add('d-none');
+            nhieuTienDiv.classList.remove('d-none');
+            soDanhInput.removeAttribute('required');
+            soDanhInput.parentElement.classList.remove('d-none');
+        } else if (value === 'lớn' || value === 'nhỏ') {
+            // Ẩn trường số đánh nếu là LỚN hoặc NHỎ
+            soDanhInput.value = ''; // xoá nếu có
+            soDanhInput.removeAttribute('required');
+            soDanhInput.parentElement.classList.add('d-none');
+            tienDanhField.classList.remove('d-none');
+            nhieuTienDiv.classList.add('d-none');
+        } else {
+            // Các cách đánh bình thường
+            soDanhInput.setAttribute('required', 'required');
+            soDanhInput.parentElement.classList.remove('d-none');
+            tienDanhField.classList.remove('d-none');
+            nhieuTienDiv.classList.add('d-none');
+        }
+    }
+
+    cachDanhSelect.addEventListener('change', updateFormFields);
+    window.addEventListener('load', () => {
+        updateFormFields();
+        taiKetQuaXoSoTheoNgay();
+    });
+
+    // Gửi form dò số
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const formData = new FormData(form);
+        const cachDanh = formData.get("cachDanh").toLowerCase();
+
+        const data = {
+            cachDanh: cachDanh,
+            mien: formData.get("mien"),
+            tenDai: formData.get("tenDai"),
+            ngay: formData.get("ngay"),
+        };
+
+        // Lớn/nhỏ không cần số đánh
+        data.soDanh = (cachDanh === 'lớn' || cachDanh === 'nhỏ') ? null : formData.get("soDanh");
+
+        // Xử lý tiền đánh
+        if (cachDanh === '3 chân') {
+            const baoLo = form.querySelector('[name="tienBaoLo"]').value || "0";
+            const thuong = form.querySelector('[name="tienThuong"]').value || "0";
+            const dacBiet = form.querySelector('[name="tienDacBiet"]').value || "0";
+            data.tienDanh = `${baoLo}-${thuong}-${dacBiet}`;
+        } else {
+            data.tienDanh = form.querySelector('[name="tienDanh"]').value || "0";
+        }
+
+        try {
+            const response = await fetch('/xoso/doiso', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const ketQua = await response.json();
+            document.getElementById('ket-qua').innerHTML = `
+                <div class="alert alert-${ketQua.trung ? 'success' : 'danger'}">
+                    <strong>Kết quả:</strong> ${
+                ketQua.trung
+                    ? `🎉 TRÚNG SỐ! Trúng: ${ketQua.tienTrung}đ ${ketQua.soDanh ? 'với số ' + ketQua.soDanh : ''} (${ketQua.cachTrung || ''})`
+                    : '💔 KHÔNG TRÚNG'
+            }<br>
+                    ${ketQua.tienTrungBaoLo !== undefined ? `💰 Bao lô: ${ketQua.tienTrungBaoLo}<br>` : ''}
+                    ${ketQua.tienTrungThuong !== undefined ? `🏆 Thượng: ${ketQua.tienTrungThuong}<br>` : ''}
+                    ${ketQua.tienTrungDacBiet !== undefined ? `🎯 Đặc biệt: ${ketQua.tienTrungDacBiet}<br>` : ''}
+                </div>
+                <pre>${JSON.stringify(ketQua, null, 2)}</pre>
+            `;
+        } catch (err) {
+            document.getElementById('ket-qua').innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>Lỗi:</strong><br>
+                    ${err.message.replaceAll('<', '&lt;')}
+                </div>
+            `;
+        }
+    });
+
+    // Tải bảng kết quả 3 miền
+    async function taiKetQuaXoSoTheoNgay() {
+        const ngay = document.getElementById('ngay-ketqua').value;
+        const mien = document.getElementById('mien-loc').value;
+        const dai = document.getElementById('dai-loc').value;
+
+        if (!ngay) {
+            alert("Vui lòng chọn ngày cần xem kết quả!");
+            return;
+        }
+
+        const params = new URLSearchParams({ ngay });
+        if (mien) params.append("mien", mien);
+        if (dai) params.append("dai", dai);
+
+        try {
+            const response = await fetch(`/xoso/ketqua?${params.toString()}`);
+            const data = await response.json();
+
+            let html = '';
+            if (data.length === 0) {
+                html = '<div class="text-muted">Không có kết quả nào khớp</div>';
+            } else {
+                data.forEach(dai => {
+                    html += `<h5>${dai.mien} – <strong>${dai.tenDai}</strong></h5>`;
+                    html += `<table class="table table-bordered table-sm mt-1">
+                        <thead><tr><th>Giải</th><th>Số trúng</th></tr></thead>
+                        <tbody>
+                            ${dai.ketQua.map(kq => `<tr><td>${kq.giai}</td><td>${kq.soTrung}</td></tr>`).join('')}
+                        </tbody>
+                    </table>`;
+                });
+            }
+
+            document.getElementById('bang-ket-qua-3mien').innerHTML = html;
+
+        } catch (e) {
+            document.getElementById('bang-ket-qua-3mien').innerHTML =
+                '<div class="text-danger">Không tải được kết quả. Kiểm tra kết nối hoặc dữ liệu.</div>';
+        }
+    }
+</script>
+
+</body>
+</html>
