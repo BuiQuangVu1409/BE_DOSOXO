@@ -2,9 +2,12 @@ package com.example.doxoso.service;
 
 import com.example.doxoso.model.Player;
 import com.example.doxoso.repository.PlayerRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional; // <—
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -13,46 +16,54 @@ public class PlayerService implements IPlayerService {
 
     private final PlayerRepository playerRepository;
 
+    @PersistenceContext
+    private EntityManager em;   // Dùng để persist (INSERT) khi tạo mới với ID do client cấp
+
     @Autowired
     public PlayerService(PlayerRepository playerRepository) {
         this.playerRepository = playerRepository;
     }
 
-    // ========= CREATE =========
+    // ========= CREATE (ID do client cấp) =========
     @Override
     @Transactional
     public Player createPlayer(Player player) {
-        // Ép tạo mới: KHÔNG merge
-        player.setId(null);
-        // Nếu có @Version trong Player:
+        // BẮT BUỘC có ID khi tạo mới
+        if (player.getId() == null) {
+            throw new IllegalArgumentException("Phải nhập ID khi tạo mới");
+        }
+        if (playerRepository.existsById(player.getId())) {
+            throw new IllegalArgumentException("ID đã tồn tại: " + player.getId());
+        }
+
+        // Nếu entity có @Version, nên để null khi tạo mới (bỏ comment nếu bạn đã thêm field version)
         // player.setVersion(null);
 
         normalizeForSave(player);
-        return playerRepository.save(player); // persist
+
+        // INSERT thật sự (không merge)
+        em.persist(player);
+        em.flush();
+        return player;
     }
 
-    // Cho controller/route đang gọi addPlayer — chuyển hướng về create
+    // Back-compat: route addPlayer gọi createPlayer cho thống nhất
     @Transactional
     public Player addPlayer(Player player) {
-        // BỎ check existsById(...) để tránh vô tình merge với id client gửi lên
-        player.setId(null);
-        // player.setVersion(null);
-        normalizeForSave(player);
-        return playerRepository.save(player);
+        return createPlayer(player);
     }
 
-    // ========= UPDATE (PATCH toàn phần theo quy ước) =========
+    // ========= UPDATE (patch toàn phần theo quy ước) =========
     @Override
     @Transactional
     public Player updatePlayer(Long id, Player patch) {
         return playerRepository.findById(id)
                 .map(p -> {
-                    // chỉ copy các field cho phép sửa
                     p.setName(trimOrNull(patch.getName()));
                     p.setPhone(patch.getPhone());
                     p.setHoaHong(patch.getHoaHong());
                     p.setHeSoCachDanh(patch.getHeSoCachDanh());
-                    return playerRepository.save(p);
+                    return playerRepository.save(p); // OK: update entity đã managed
                 })
                 .orElseThrow(() -> new RuntimeException("Player not found with id: " + id));
     }
@@ -62,7 +73,7 @@ public class PlayerService implements IPlayerService {
     public Player replacePlayer(Long id, Player incoming) {
         return playerRepository.findById(id)
                 .map(existing -> {
-                    // Không nhận version từ client để tránh stale
+                    // KHÔNG nhận version từ client (nếu có @Version) để tránh stale
                     existing.setName(trimOrNull(incoming.getName()));
                     existing.setPhone(incoming.getPhone());
                     existing.setHoaHong(incoming.getHoaHong());

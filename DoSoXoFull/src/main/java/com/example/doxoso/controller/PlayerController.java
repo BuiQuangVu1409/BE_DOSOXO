@@ -1,12 +1,13 @@
 package com.example.doxoso.controller;
 
-
 import com.example.doxoso.model.Bet;
 import com.example.doxoso.model.DoiChieuKetQuaDto;
 import com.example.doxoso.model.Player;
 import com.example.doxoso.model.PlayerDoKetQuaDto;
-//import com.example.doxoso.model.SoNguoiChoi;
-import com.example.doxoso.service.*;
+import com.example.doxoso.service.BetService;
+import com.example.doxoso.service.KetQuaService;
+import com.example.doxoso.service.KiemTraKetQuaService;
+import com.example.doxoso.service.PlayerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -18,6 +19,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+
 @CrossOrigin(origins = {"http://localhost:3000","http://localhost:3001","http://localhost:5173"})
 @RestController
 @RequestMapping("/api/player")
@@ -34,15 +36,16 @@ public class PlayerController {
 
     @Autowired
     private KetQuaService ketQuaService;
-    // Tạo mới Player
-    @PostMapping // nếu class @RequestMapping("/api/player") thì giữ nguyên; nếu không, dùng @PostMapping("/api/player")
+
+    // ===================== CREATE (Client cấp ID) =====================
+    @PostMapping
     public ResponseEntity<?> addPlayer(@RequestBody Player player) {
-        // 1) Không cho tạo mới kèm ID (tránh merge)
-        if (player.getId() != null) {
+        // 1) BẮT BUỘC có ID khi tạo mới
+        if (player.getId() == null) {
             return ResponseEntity.badRequest().body(
                     Map.of(
-                            "error", "Không gửi ID khi tạo mới",
-                            "suggestion", "Dùng PUT /api/player/{id} để thay thế dữ liệu cũ"
+                            "error", "Thiếu ID",
+                            "suggestion", "Thêm mới bắt buộc truyền 'id' duy nhất trong body"
                     )
             );
         }
@@ -59,21 +62,12 @@ public class PlayerController {
         }
         player.setName(name);
 
-        // 3) Ép version = null để đảm bảo persist (đặc biệt khi có @Version)
-//        if (player.getVersion() != null) {
-//            player.setVersion(null);
-//        }
-
-        // (Tuỳ entity, nếu có createdAt/updatedAt từ client gửi nhầm, có thể xoá/để null)
-        // player.setCreatedAt(null);
-        // player.setUpdatedAt(null);
+        // Nếu entity có @Version thì KHÔNG nhận version từ client khi tạo mới
+        // player.setVersion(null);
 
         try {
-            // Khuyến nghị: gọi hàm createPlayer(...) trong service
-            // hàm này nên setId(null) lần nữa để chắc chắn persist
-            Player saved = playerService.createPlayer(player);
+            Player saved = playerService.createPlayer(player); // service dùng persist để INSERT với ID client cấp
 
-            // 4) Trả 201 + Location header
             URI location = ServletUriComponentsBuilder
                     .fromCurrentRequest()
                     .path("/{id}")
@@ -82,13 +76,18 @@ public class PlayerController {
 
             return ResponseEntity.created(location).body(saved);
 
+        } catch (IllegalArgumentException ex) {
+            // Ví dụ ID đã tồn tại (service đã kiểm tra existsById)
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                    Map.of("error", "Xung đột dữ liệu", "message", ex.getMessage())
+            );
         } catch (DataIntegrityViolationException ex) {
-            // Ví dụ trùng unique key khác (phone, name...) do ràng buộc DB
+            // Trùng unique key khác (phone, name...) nếu DB có ràng buộc
             return ResponseEntity.status(HttpStatus.CONFLICT).body(
                     Map.of("error", "Xung đột dữ liệu", "message", ex.getMostSpecificCause().getMessage())
             );
         } catch (ObjectOptimisticLockingFailureException ex) {
-            // Trường hợp hiếm nếu vẫn va vào optimistic locking
+            // Hiếm gặp khi create nếu đã cấu hình đúng; vẫn bắt để an toàn
             return ResponseEntity.status(HttpStatus.CONFLICT).body(
                     Map.of("error", "Xung đột phiên bản", "message", ex.getMessage())
             );
@@ -99,24 +98,22 @@ public class PlayerController {
         }
     }
 
-    // Lấy tất cả Player
-
+    // ===================== READ ALL =====================
     @GetMapping({"", "/"})
     public ResponseEntity<List<Player>> getAllPlayers() {
         return ResponseEntity.ok(playerService.getAllPlayers());
     }
 
-    // Lấy theo id / trả về kết quả dò theo playerId
+    // ===================== READ by ID (kèm dò kết quả) =====================
     @GetMapping({"/{playerId}", "/{playerId}/"})
     public ResponseEntity<?> getByPlayerId(@PathVariable Long playerId) {
         List<Bet> list = betService.getSoNguoiChoiByPlayerId(playerId);
         if (list == null || list.isEmpty()) {
+            // Giữ nguyên hành vi cũ: 404 + text
             return ResponseEntity.status(404).body("Không tìm thấy dữ liệu cho playerId = " + playerId);
         }
 
         var player = list.get(0).getPlayer();
-
-        // ✅ Dùng service trung gian
         List<DoiChieuKetQuaDto> ketQua = ketQuaService.doKetQua(list);
 
         PlayerDoKetQuaDto response = new PlayerDoKetQuaDto();
@@ -129,34 +126,31 @@ public class PlayerController {
         return ResponseEntity.ok(response);
     }
 
-
+    // ===================== REPLACE (PUT) =====================
     @PutMapping("/{id}")
-        public ResponseEntity<?> replacePlayer (
-                @PathVariable Long id,
-                @RequestBody Player player){
-            Player updated = playerService.replacePlayer(id, player);
-            return ResponseEntity.ok(updated);
-        }
-        // Xoá Player
-        @DeleteMapping("/{id}")
-        public ResponseEntity<Void> deletePlayer (@PathVariable Long id){
-            playerService.deletePlayer(id);
-            return ResponseEntity.noContent().build();
-        }
-
-        // Cập nhật hoa hồng riêng
-        @PatchMapping("/{id}/hoahong")
-        public ResponseEntity<Player> updateHoaHong (@PathVariable Long id, @RequestParam Double hoaHong){
-            return ResponseEntity.ok(playerService.updateHoaHong(id, hoaHong));
-        }
-//    http://localhost:8080/api/player/10/hoahong?hoaHong=69.5
-        // Cập nhật hệ số cách đánh riêng
-        @PatchMapping("/{id}/heso")
-        public ResponseEntity<Player> updateHeSo (@PathVariable Long id, @RequestParam Double heSo){
-            return ResponseEntity.ok(playerService.updateHeSoCachDanh(id, heSo));
-        }
-//   http://localhost:8080/api/player/10/heso?heSo=2.5
-
+    public ResponseEntity<?> replacePlayer(@PathVariable Long id, @RequestBody Player player) {
+        Player updated = playerService.replacePlayer(id, player);
+        return ResponseEntity.ok(updated);
     }
 
+    // ===================== DELETE =====================
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deletePlayer(@PathVariable Long id) {
+        playerService.deletePlayer(id);
+        return ResponseEntity.noContent().build();
+    }
 
+    // ===================== PATCH: hoa hồng =====================
+    @PatchMapping("/{id}/hoahong")
+    public ResponseEntity<Player> updateHoaHong(@PathVariable Long id, @RequestParam Double hoaHong) {
+        return ResponseEntity.ok(playerService.updateHoaHong(id, hoaHong));
+    }
+    // ví dụ: http://localhost:8080/api/player/10/hoahong?hoaHong=69.5
+
+    // ===================== PATCH: hệ số cách đánh =====================
+    @PatchMapping("/{id}/heso")
+    public ResponseEntity<Player> updateHeSo(@PathVariable Long id, @RequestParam Double heSo) {
+        return ResponseEntity.ok(playerService.updateHeSoCachDanh(id, heSo));
+    }
+    // ví dụ: http://localhost:8080/api/player/10/heso?heSo=2.5
+}
