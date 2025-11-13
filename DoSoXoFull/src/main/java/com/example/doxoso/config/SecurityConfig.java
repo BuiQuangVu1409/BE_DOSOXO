@@ -92,7 +92,10 @@ public class SecurityConfig {
 //permitAll Là luật cấp quyền: “cho phép tất cả” các request đã được chọn ở trên không cần đăng nhập/không cần role.
                         .requestMatchers(HttpMethod.GET, "/api/bets/**", "/api/songuoichoi/**").permitAll()
 
-                        // (Tuỳ bạn muốn public đọc bet hay không)
+                                .requestMatchers(HttpMethod.GET, "/lich/**").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/api/ketqua/**").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/ket-qua-tich/**").permitAll()
+                                // (Tuỳ bạn muốn public đọc bet hay không)
                         // .requestMatchers(HttpMethod.GET, "/api/bets/**", "/api/songuoichoi/**").permitAll()
 
                         // Khu vực cần role
