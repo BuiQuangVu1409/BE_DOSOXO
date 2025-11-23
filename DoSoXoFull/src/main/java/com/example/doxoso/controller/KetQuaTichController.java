@@ -2,6 +2,7 @@ package com.example.doxoso.controller;
 
 import com.example.doxoso.model.KetQuaTich;
 import com.example.doxoso.repository.BetRepository;
+import com.example.doxoso.repository.KetQuaTichRepository;
 import com.example.doxoso.service.KetQuaTichService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -26,39 +27,46 @@ public class KetQuaTichController {
 
     private final KetQuaTichService service;
     private final BetRepository betRepository;
+    private final KetQuaTichRepository ketQuaTichRepo;
 
     /**
-     * Lấy snapshot đã lưu (3 dòng/miền) cho 1 player trong 1 ngày.
-     * Query params:
-     *  - auto=true   : nếu chưa có thì tự run & save rồi trả về
-     *  - refresh=true: luôn run & save lại (bỏ qua snapshot cũ)
-     * Luôn trả về 200 + JSON array (kể cả rỗng) để FE dễ xử lý.
+     * API chính: lấy KQT đã lưu hoặc auto chạy.
+     *
+     * auto=true   → nếu chưa có snapshot thì tự run.
+     * refresh=true → luôn luôn tính lại + lưu.
      */
-    @GetMapping(value = "/{playerId}/{ngay}", produces = "application/json")
+    @GetMapping("/{playerId}/{ngay}")
     public ResponseEntity<?> getOrRun(
             @PathVariable Long playerId,
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate ngay,
-            @RequestParam(name = "auto", required = false, defaultValue = "false") boolean autoCreate,
-            @RequestParam(name = "refresh", required = false, defaultValue = "false") boolean refresh
+            @RequestParam(defaultValue = "false") boolean auto,
+            @RequestParam(defaultValue = "false") boolean refresh
     ) {
         try {
+            // 1️⃣ Nếu refresh → bỏ qua snapshot cũ → tính lại luôn
             if (refresh) {
-                List<KetQuaTich> fresh = service.runAndSaveForPlayer(playerId, null, ngay);
-                return ResponseEntity.ok(fresh);
+                List<KetQuaTich> rows = service.runAndSaveForPlayer(playerId, null, ngay);
+                return ResponseEntity.ok(rows);
             }
-            List<KetQuaTich> snapshot = service.findByPlayerAndNgay(playerId, ngay);
-            if ((snapshot == null || snapshot.isEmpty()) && autoCreate) {
+
+            // 2️⃣ Lấy snapshot nếu có
+            List<KetQuaTich> snapshot = ketQuaTichRepo.findByPlayerIdAndNgay(playerId, ngay);
+
+            // 3️⃣ Nếu chưa có & auto=true → tự chạy & trả về
+            if ((snapshot == null || snapshot.isEmpty()) && auto) {
                 snapshot = service.runAndSaveForPlayer(playerId, null, ngay);
             }
+
             return ResponseEntity.ok(snapshot == null ? List.of() : snapshot);
+
         } catch (Exception e) {
             return error(e);
         }
     }
 
-    /** Alias refresh dạng GET cho dễ gọi từ trình duyệt */
-    @GetMapping(value = "/{playerId}/{ngay}/refresh", produces = "application/json")
-    public ResponseEntity<?> refreshOne(
+    /** API refresh dạng GET */
+    @GetMapping("/{playerId}/{ngay}/refresh")
+    public ResponseEntity<?> hardRefresh(
             @PathVariable Long playerId,
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate ngay
     ) {
@@ -69,25 +77,28 @@ public class KetQuaTichController {
         }
     }
 
-    /** Kiểm tra tồn tại snapshot (trả về {exists, count}) */
-    @GetMapping(value = "/exists/{playerId}/{ngay}", produces = "application/json")
+    /** Kiểm tra snapshot có tồn tại chưa */
+    @GetMapping("/exists/{playerId}/{ngay}")
     public ResponseEntity<?> exists(
             @PathVariable Long playerId,
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate ngay
     ) {
         try {
-            List<KetQuaTich> snapshot = service.findByPlayerAndNgay(playerId, ngay);
+            List<KetQuaTich> list = ketQuaTichRepo.findByPlayerIdAndNgay(playerId, ngay);
             Map<String, Object> body = new LinkedHashMap<>();
-            int count = snapshot == null ? 0 : snapshot.size();
+            int count = list == null ? 0 : list.size();
+
             body.put("exists", count > 0);
             body.put("count", count);
+
             return ResponseEntity.ok(body);
+
         } catch (Exception e) {
             return error(e);
         }
     }
 
-    /** Chạy & lưu 3 miền cho 1 player trong 1 ngày. */
+    /** Chạy & lưu KQT 1 player */
     @PostMapping("/run-save/{playerId}/{ngay}")
     public ResponseEntity<?> runSaveOne(
             @PathVariable Long playerId,
@@ -101,7 +112,7 @@ public class KetQuaTichController {
         }
     }
 
-    /** Chạy & lưu đồng loạt cho tất cả player có cược trong ngày. */
+    /** Chạy & lưu ALL player trong ngày */
     @PostMapping("/run-save-all/{ngay}")
     public ResponseEntity<?> runSaveAll(
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate ngay
@@ -118,7 +129,7 @@ public class KetQuaTichController {
         }
     }
 
-    // -------- helpers --------
+    // -------- ERROR --------
     private ResponseEntity<Map<String, Object>> error(Exception e) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", e.getClass().getSimpleName());

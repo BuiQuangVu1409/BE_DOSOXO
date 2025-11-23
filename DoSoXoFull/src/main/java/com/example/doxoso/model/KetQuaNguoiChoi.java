@@ -56,8 +56,10 @@ public class KetQuaNguoiChoi {
     private Long sourceSoId;
 
     // NEW: đánh dấu bản summary (tổng quát) hay chi tiết
-    @Column(name = "is_summary", nullable = false)
-    private boolean summary;
+//    @Column(name = "is_summary", nullable = false)
+//    private boolean summary;
+    @Column(name = "is_summary")
+    private Boolean summary = false;
 
     @Version
     private Long version;
