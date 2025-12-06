@@ -3,7 +3,7 @@ package com.example.doxoso.service;
 import com.example.doxoso.model.Bet;
 import com.example.doxoso.model.DoiChieuKetQuaDto;
 
-import com.example.doxoso.model.Bet;
+
 import com.example.doxoso.repository.BetRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;

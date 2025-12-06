@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TongTienHHService {
 
-    // Số lẻ muốn hiển thị (VND => 0)
+    // Số lẻ muốn hiển thị (VND => có thể để 2, FE format vẫn OK)
     private static final int SCALE = 2;
     // Workaround thay cho RoundingMode.HALF_UP
     private static final int RM = BigDecimal.ROUND_HALF_UP;
@@ -32,7 +32,8 @@ public class TongTienHHService {
         Player p = playerRepository.findById(playerId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy Player id=" + playerId));
 
-        BigDecimal rate = normalizeRate(p.getHoaHong()); // 69 -> 0.69 ; 69,5 -> 0.695 ; 0.05 -> 0.05
+        // 👇 LẤY % hoa hồng từ players, convert sang hệ số
+        BigDecimal rate = percentToRate(p.getHoaHong());   // ví dụ 69.5 -> 0.695
 
         BigDecimal mb = safe(tong.getMienBac()).multiply(rate).setScale(SCALE, RM);
         BigDecimal mt = safe(tong.getMienTrung()).multiply(rate).setScale(SCALE, RM);
@@ -42,7 +43,7 @@ public class TongTienHHService {
         return PlayerTongTienHH.builder()
                 .playerId(playerId)
                 .playerName(tong.getPlayerName())
-                .heSoHoaHong(rate)
+                .heSoHoaHong(rate)                // 69.5% -> 0.695
                 .hoaHongMB(mb)
                 .hoaHongMT(mt)
                 .hoaHongMN(mn)
@@ -59,7 +60,7 @@ public class TongTienHHService {
     /* ========== MỚI #2: Tính hoa hồng cho TẤT CẢ player ========== */
     @Transactional(readOnly = true)
     public List<PlayerTongTienHH> tinhHoaHongTatCaPlayer() {
-        // a) Lấy tổng theo miền của tất cả player (đã loại LỚN/NHỎ/LỚN-NHỎ)
+        // a) Lấy tổng theo miền của tất cả player (đã loại LỚN/NHỎ/LỚN-NHỎ nếu anh set EXCLUDED)
         List<PlayerTongTienDanhTheoMienDto> tongAll = tongTienService.tinhTatCaPlayer();
 
         // b) Lấy rate của tất cả player cần tính (1 lần) -> map {id -> Player}
@@ -71,9 +72,9 @@ public class TongTienHHService {
         List<PlayerTongTienHH> result = new ArrayList<>();
         for (PlayerTongTienDanhTheoMienDto t : tongAll) {
             Player p = playerById.get(t.getPlayerId());
-            if (p == null) continue; // không tìm thấy player tương ứng (hiếm)
+            if (p == null) continue;
 
-            BigDecimal rate = normalizeRate(p.getHoaHong());
+            BigDecimal rate = percentToRate(p.getHoaHong());   // 👈 dùng % từ players
 
             BigDecimal mb = safe(t.getMienBac()).multiply(rate).setScale(SCALE, RM);
             BigDecimal mt = safe(t.getMienTrung()).multiply(rate).setScale(SCALE, RM);
@@ -96,17 +97,16 @@ public class TongTienHHService {
         return result;
     }
 
-
     /** 👉 Tính hoa hồng *theo ngày* cho 1 player trong khoảng [from, to] */
     @Transactional(readOnly = true)
     public List<PlayerTongTienHH> tinhHoaHongTheoNgay(Long playerId, LocalDate from, LocalDate to) {
         // 1) Lấy tổng tiền theo MIỀN cho từng ngày
         List<PlayerTongTienDanhTheoMienDto> tongByDay = tongTienService.tinhTongTheoMienTheoNgay(playerId, from, to);
 
-        // 2) Lấy hệ số hoa hồng của player (chuẩn hoá về tỉ lệ 0.xx)
+        // 2) Lấy % hoa hồng của player, convert sang hệ số
         Player p = playerRepository.findById(playerId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy Player id=" + playerId));
-        BigDecimal rate = normalizeRate(p.getHoaHong());
+        BigDecimal rate = percentToRate(p.getHoaHong());       // 👈 hoa hồng %
 
         // 3) Nhân theo từng ngày
         List<PlayerTongTienHH> rs = new ArrayList<>();
@@ -132,41 +132,41 @@ public class TongTienHHService {
 
     /* ================= Helpers ================= */
 
-    // Nhận BigDecimal/Number/String ("69", "69,5", "0.05") -> trả về tỉ lệ 0.xx
-    private static BigDecimal normalizeRate(Object raw) {
-        if (raw == null) return BigDecimal.ZERO;
+    // ✅ Nhận "5", "10", "69,5", "69.5", BigDecimal, Number...
+    //    LUÔN hiểu là PHẦN TRĂM → convert sang hệ số 0.xx
+    private static BigDecimal percentToRate(Object rawPercent) {
+        if (rawPercent == null) return BigDecimal.ZERO;
 
         BigDecimal v;
-        if (raw instanceof BigDecimal) {
-            v = (BigDecimal) raw;
-        } else if (raw instanceof Number) {
-            v = new BigDecimal(raw.toString());
+        if (rawPercent instanceof BigDecimal) {
+            v = (BigDecimal) rawPercent;
+        } else if (rawPercent instanceof Number) {
+            v = new BigDecimal(rawPercent.toString());
         } else {
-            String s = raw.toString().trim();
+            String s = rawPercent.toString().trim();
             if (s.isEmpty()) return BigDecimal.ZERO;
 
+            // bỏ ký tự % và khoảng trắng
+            s = s.replace("%", "").trim();
+
+            // xử lý "69,5" -> "69.5"
             if (s.contains(",") && !s.contains(".")) {
-                int comma = s.lastIndexOf(',');
-                int decimals = s.length() - comma - 1;
-                if (decimals >= 1 && decimals <= 3) {
-                    s = s.replace(",", ".");
-                } else {
-                    s = s.replace(",", ""); // ngăn nghìn
-                }
+                s = s.replace(".", "").replace(",", ".");
             } else {
-                s = s.replace(",", ""); // ngăn nghìn
+                // "1,000.5" -> "1000.5"
+                s = s.replace(",", "");
             }
+
             try {
                 v = new BigDecimal(s);
             } catch (NumberFormatException ex) {
-                throw new IllegalArgumentException("Hoa hồng không hợp lệ: '" + raw + "'");
+                throw new IllegalArgumentException("Hoa hồng không hợp lệ: '" + rawPercent + "'");
             }
         }
 
-        // >1 => hiểu là % -> chia 100 về tỉ lệ; <=1 => giữ nguyên
-        return (v.compareTo(BigDecimal.ONE) > 0)
-                ? v.divide(BigDecimal.valueOf(100), 6, RM)
-                : v.setScale(6, RM);
+        // LUÔN coi là % → chia 100
+        // 5 -> 0.05 ; 69.5 -> 0.695
+        return v.divide(BigDecimal.valueOf(100), 6, RM);
     }
 
     private static BigDecimal safe(BigDecimal n) {

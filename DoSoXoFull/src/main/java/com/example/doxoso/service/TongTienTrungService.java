@@ -20,14 +20,20 @@ public class TongTienTrungService {
     private KetQuaNguoiChoiRepository ketQuaRepo;
     @Autowired
     private PlayerRepository playerRepo;
-    /** Gom từ list DTO vừa dò (1 player) */
+
+    /**
+     * Gom từ list DTO vừa dò (1 player)
+     * 🔹 ĐÃ LOẠI LỚN / NHỎ KHỎI TỔNG TIỀN TRÚNG
+     */
     public TongTienTrungDto tongHopTuKetQuaDtos(
             Long playerId, LocalDate ngay, List<DoiChieuKetQuaDto> ketQua) {
 
-        // 1) Lọc các record trúng và có tiền > 0
+        // 1) Lọc các record trúng, tiền > 0 và KHÔNG PHẢI LỚN/NHỎ
         List<DoiChieuKetQuaDto> trungList = ketQua.stream()
                 .filter(k -> Boolean.TRUE.equals(k.isTrung()))
                 .filter(k -> safe(k.getTienTrung()).compareTo(BigDecimal.ZERO) > 0)
+                // ❌ Loại cách đánh LỚN / NHỎ ra khỏi tổng
+                .filter(k -> !isLonNho(k.getCachDanh()))
                 .toList();
 
         // 2) Group theo Mã Miền (MB/MT/MN) → Đài → Cách đánh (đã chuẩn hoá)
@@ -168,16 +174,23 @@ public class TongTienTrungService {
 
         // Double-check scale (phòng sót)
         dto.setTongToanBo(money(dto.getTongToanBo()));
-        dto.getCacMien().forEach(mien -> {
-            mien.setTongTienMien(money(mien.getTongTienMien()));
-            mien.getCacDai().forEach(dai -> {
-                dai.setTongTienDai(money(dai.getTongTienDai()));
-                dai.getCacCachDanh().forEach(cd -> cd.setTienTrung(money(cd.getTienTrung())));
+        if (dto.getCacMien() != null) {
+            dto.getCacMien().forEach(mien -> {
+                mien.setTongTienMien(money(mien.getTongTienMien()));
+                if (mien.getCacDai() != null) {
+                    mien.getCacDai().forEach(dai -> {
+                        dai.setTongTienDai(money(dai.getTongTienDai()));
+                        if (dai.getCacCachDanh() != null) {
+                            dai.getCacCachDanh().forEach(cd -> cd.setTienTrung(money(cd.getTienTrung())));
+                        }
+                    });
+                }
             });
-        });
+        }
 
         return dto;
     }
+
     /** Đọc DB và trả về KẾT QUẢ THEO TỪNG PLAYER + grand total */
     public TongTienTrungAllPlayersDto tongHopTheoTungPlayer(LocalDate ngay) {
         // Lấy tất cả record TRÚNG trong ngày
@@ -209,13 +222,19 @@ public class TongTienTrungService {
 
             // scale cho chắc
             perPlayer.setTongToanBo(money(perPlayer.getTongToanBo()));
-            perPlayer.getCacMien().forEach(m -> {
-                m.setTongTienMien(money(m.getTongTienMien()));
-                m.getCacDai().forEach(d -> {
-                    d.setTongTienDai(money(d.getTongTienDai()));
-                    d.getCacCachDanh().forEach(cd -> cd.setTienTrung(money(cd.getTienTrung())));
+            if (perPlayer.getCacMien() != null) {
+                perPlayer.getCacMien().forEach(m -> {
+                    m.setTongTienMien(money(m.getTongTienMien()));
+                    if (m.getCacDai() != null) {
+                        m.getCacDai().forEach(d -> {
+                            d.setTongTienDai(money(d.getTongTienDai()));
+                            if (d.getCacCachDanh() != null) {
+                                d.getCacCachDanh().forEach(cd -> cd.setTienTrung(money(cd.getTienTrung())));
+                            }
+                        });
+                    }
                 });
-            });
+            }
 
             TongTienTrungAllPlayersDto.PlayerBlock block = new TongTienTrungAllPlayersDto.PlayerBlock();
             block.setPlayerId(pid);
@@ -238,9 +257,10 @@ public class TongTienTrungService {
         return out;
     }
 
-
-
-    /** Tổng hợp THEO TỪNG PLAYER trong 1 ngày, có lọc miền (MB/MT/MN hoặc rỗng) + join tên player */
+    /**
+     * Tổng hợp THEO TỪNG PLAYER trong 1 ngày,
+     * có lọc miền (MB/MT/MN hoặc rỗng) + join tên player
+     */
     public TongTienTrungAllPlayersDto tongHopTheoTungPlayerTheoMien(LocalDate ngay, String mienParam) {
         // 1) chuẩn hoá filter miền thành code {MB,MT,MN}
         Set<String> filterCodes = toMienCodesFromParam(mienParam); // null/empty => {MB,MT,MN}
@@ -296,13 +316,19 @@ public class TongTienTrungService {
 
             // scale & đóng gói
             perPlayer.setTongToanBo(money(perPlayer.getTongToanBo()));
-            perPlayer.getCacMien().forEach(m -> {
-                m.setTongTienMien(money(m.getTongTienMien()));
-                m.getCacDai().forEach(d -> {
-                    d.setTongTienDai(money(d.getTongTienDai()));
-                    d.getCacCachDanh().forEach(cd -> cd.setTienTrung(money(cd.getTienTrung())));
+            if (perPlayer.getCacMien() != null) {
+                perPlayer.getCacMien().forEach(m -> {
+                    m.setTongTienMien(money(m.getTongTienMien()));
+                    if (m.getCacDai() != null) {
+                        m.getCacDai().forEach(d -> {
+                            d.setTongTienDai(money(d.getTongTienDai()));
+                            if (d.getCacCachDanh() != null) {
+                                d.getCacCachDanh().forEach(cd -> cd.setTienTrung(money(cd.getTienTrung())));
+                            }
+                        });
+                    }
                 });
-            });
+            }
 
             var block = new TongTienTrungAllPlayersDto.PlayerBlock();
             block.setPlayerId(pid);
@@ -326,16 +352,15 @@ public class TongTienTrungService {
 
     /** parse param 'mien' -> set code {MB,MT,MN} */
     private static Set<String> toMienCodesFromParam(String mienParam) {
-        if (mienParam == null || mienParam.isBlank()) return Set.of("MB","MT","MN");
+        if (mienParam == null || mienParam.isBlank()) return Set.of("MB", "MT", "MN");
         String[] parts = mienParam.split("[,|]");
         Set<String> out = new HashSet<>();
         for (String p : parts) {
             String code = toMienCode(p);
             if ("MB".equals(code) || "MT".equals(code) || "MN".equals(code)) out.add(code);
         }
-        return out.isEmpty() ? Set.of("MB","MT","MN") : out;
+        return out.isEmpty() ? Set.of("MB", "MT", "MN") : out;
     }
-
 
     // =================== Helpers ===================
 
@@ -350,11 +375,14 @@ public class TongTienTrungService {
     }
 
     /** Scale tiền chuẩn (0 số lẻ; đổi 2 nếu muốn) */
-    private static BigDecimal money(BigDecimal b) { return safe(b).setScale(0, BigDecimal.ROUND_HALF_UP); }
+    private static BigDecimal money(BigDecimal b) {
+        return safe(b).setScale(0, BigDecimal.ROUND_HALF_UP);
+    }
 
     private static BigDecimal safe(Double d) {
         return d == null ? BigDecimal.ZERO : BigDecimal.valueOf(d); // KHÔNG dùng new BigDecimal(double)
     }
+
     private static BigDecimal safe(BigDecimal b) {
         return b == null ? BigDecimal.ZERO : b;
     }
@@ -362,6 +390,7 @@ public class TongTienTrungService {
     private static String upper(String s) {
         return s == null ? "" : s.trim().toUpperCase();
     }
+
     private static String upperOrName(String s) {
         return s == null ? "N/A" : s.trim().toUpperCase();
     }
@@ -377,15 +406,28 @@ public class TongTienTrungService {
         // map biến thể
         u = u.replaceAll("\\bXUYEN\\b", "XUYÊN");
         u = u.replaceAll("\\bCHAN\\b", "CHÂN");
+
+        // ✅ map luôn LON/NHO → LỚN/NHỎ cho ổn định
+        u = u.replaceAll("\\bLON\\b", "LỚN");
+        u = u.replaceAll("\\bNHO\\b", "NHỎ");
+
         return u;
+    }
+
+    /** Xác định cách đánh LỚN / NHỎ để loại khỏi tổng tiền trúng */
+    private static boolean isLonNho(String cachDanh) {
+        String u = normalizeCachDanh(cachDanh);
+        return "LỚN".equals(u)
+                || "NHỎ".equals(u)
+                || "LỚN NHỎ".equals(u); // phòng khi sau này có kiểu ghi chung
     }
 
     /** Map các biến thể tên miền → mã miền ổn định */
     private static String toMienCode(String mien) {
         String u = upper(mien);
-        if (u.equals("MB") || u.contains("BẮC") || u.contains("BAC"))   return "MB";
-        if (u.equals("MT") || u.contains("TRUNG"))                      return "MT";
-        if (u.equals("MN") || u.contains("NAM"))                        return "MN";
+        if (u.equals("MB") || u.contains("BẮC") || u.contains("BAC")) return "MB";
+        if (u.equals("MT") || u.contains("TRUNG")) return "MT";
+        if (u.equals("MN") || u.contains("NAM")) return "MN";
         return "??";
     }
 

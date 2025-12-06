@@ -34,13 +34,17 @@ public class SecurityConfig {
         this.userDetailsService = userDetailsService;
     }
 
-    /** BCrypt chuẩn */
+    /**
+     * BCrypt chuẩn
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
-    /** AuthenticationManager chuẩn cách mới (Boot 3.x) */
+    /**
+     * AuthenticationManager chuẩn cách mới (Boot 3.x)
+     */
     @Bean
     public AuthenticationManager authenticationManager(HttpSecurity http,
                                                        PasswordEncoder passwordEncoder,
@@ -50,7 +54,9 @@ public class SecurityConfig {
         return authBuilder.build();
     }
 
-    /** CORS Global cho FE in dev (5173, 3000, 3001) */
+    /**
+     * CORS Global cho FE in dev (5173, 3000, 3001)
+     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cfg = new CorsConfiguration();
@@ -59,8 +65,8 @@ public class SecurityConfig {
                 "http://localhost:3000",
                 "http://localhost:3001"
         ));
-        cfg.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
-        cfg.setAllowedHeaders(List.of("Authorization","Content-Type","X-Requested-With"));
+        cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        cfg.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
         cfg.setAllowCredentials(true); // nếu gửi cookie/JWT
         cfg.setMaxAge(3600L);
 
@@ -69,7 +75,72 @@ public class SecurityConfig {
         return source;
     }
 
-    /** Chuỗi filter & phân quyền */
+    /**
+     * Chuỗi filter & phân quyền
+     */
+//    @Bean
+//    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+//        http
+//                // Bật CORS, tắt CSRF (REST + JWT)
+//                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+//                .csrf(csrf -> csrf.disable())
+//
+//                // Phân quyền theo route
+//                .authorizeHttpRequests(auth -> auth
+//                        // Cho preflight
+//                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+//
+//                        // Public: auth endpoints (login/register/refresh)
+//                        .requestMatchers("/auth/**").permitAll()
+//
+//                        // Public GET kết quả xổ số cho FE
+//                        .requestMatchers(HttpMethod.GET, "/xoso/**").permitAll()
+//
+//                        // Public GET player
+//                        .requestMatchers(HttpMethod.GET, "/api/player/**").permitAll()
+//
+//                        // Public GET bets
+//                        .requestMatchers(HttpMethod.GET, "/api/bets/**", "/api/songuoichoi/**").permitAll()
+//
+//                        // ⭐ NEW: cho phép gọi POST vào /api/bets khi bạn test tạo cược bằng Postman
+//                        // (nếu không cần thì có thể bỏ)
+//                        .requestMatchers(HttpMethod.POST, "/api/bets/**", "/api/songuoichoi/**").permitAll()
+//
+//                        .requestMatchers(HttpMethod.GET, "/lich/**").permitAll()
+//                        .requestMatchers(HttpMethod.GET, "/api/ketqua/**").permitAll()
+//
+//                        // Hiện tại bạn chỉ permitAll GET /ket-qua-tich/**
+//                        .requestMatchers(HttpMethod.GET, "/ket-qua-tich/**").permitAll()
+//
+//                        // ⭐ NEW: CHO PHÉP POST để gọi run-save / run-save-all
+//                        .requestMatchers(HttpMethod.POST, "/ket-qua-tich/**").permitAll()
+//
+//                        // (nếu sau này muốn PUT/PATCH/DELETE trên KQT cũng gọi được không cần login,
+//                        // có thể thêm:
+//                        // .requestMatchers(HttpMethod.PUT, "/ket-qua-tich/**").permitAll()
+//                        // .requestMatchers(HttpMethod.PATCH, "/ket-qua-tich/**").permitAll()
+//                        // .requestMatchers(HttpMethod.DELETE, "/ket-qua-tich/**").permitAll()
+//                        // )
+//
+//                        .requestMatchers(HttpMethod.GET, "/tong-tien/**").permitAll()
+//
+//                        // Khu vực cần role
+//                        .requestMatchers("/admin/tong/**").hasRole("ADMIN_TONG")
+//                        .requestMatchers("/admin/quanly/**").hasAnyRole("ADMIN_QUAN_LY", "ADMIN_TONG")
+//                        .requestMatchers("/user/**").hasAnyRole("USER", "ADMIN_QUAN_LY", "ADMIN_TONG")
+//
+//                        // Mặc định: yêu cầu authenticated
+//                        .anyRequest().authenticated()
+//                )
+//
+//                // Stateless session (JWT)
+//                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+//
+//                // Gắn JWT filter trước UsernamePasswordAuthenticationFilter
+//                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+//
+//        return http.build();
+//    }
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -77,42 +148,17 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
 
-                // Phân quyền theo route
+                // 💥 TẠM THỜI: cho phép TẤT CẢ request, bỏ hết phân quyền route
                 .authorizeHttpRequests(auth -> auth
-                        // Cho preflight
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-
-                        // Public: auth endpoints (login/register/refresh)
-                        .requestMatchers("/auth/**").permitAll()
-
-                        // Public GET kết quả xổ số cho FE
-                        .requestMatchers(HttpMethod.GET, "/xoso/**").permitAll()
-//requestMatchers Là bộ chọn request: bạn chỉ định điều kiện (đường dẫn, HTTP method, header…) để áp dụng một luật tiếp theo.
-                        .requestMatchers(HttpMethod.GET, "/api/player/**").permitAll()
-//permitAll Là luật cấp quyền: “cho phép tất cả” các request đã được chọn ở trên không cần đăng nhập/không cần role.
-                        .requestMatchers(HttpMethod.GET, "/api/bets/**", "/api/songuoichoi/**").permitAll()
-
-                                .requestMatchers(HttpMethod.GET, "/lich/**").permitAll()
-                                .requestMatchers(HttpMethod.GET, "/api/ketqua/**").permitAll()
-                                .requestMatchers(HttpMethod.GET, "/ket-qua-tich/**").permitAll()
-                                // (Tuỳ bạn muốn public đọc bet hay không)
-                        // .requestMatchers(HttpMethod.GET, "/api/bets/**", "/api/songuoichoi/**").permitAll()
-
-                        // Khu vực cần role
-                        .requestMatchers("/admin/tong/**").hasRole("ADMIN_TONG")
-                        .requestMatchers("/admin/quanly/**").hasAnyRole("ADMIN_QUAN_LY","ADMIN_TONG")
-                        .requestMatchers("/user/**").hasAnyRole("USER","ADMIN_QUAN_LY","ADMIN_TONG")
-
-                        // Mặc định: yêu cầu authenticated
-                        .anyRequest().authenticated()
+                        .anyRequest().permitAll()
                 )
 
-                // Stateless session (JWT)
-                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
 
-                // Gắn JWT filter trước UsernamePasswordAuthenticationFilter
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        // 💥 TẠM THỜI KHÔNG GẮN JWT FILTER
+        // .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
+
 }

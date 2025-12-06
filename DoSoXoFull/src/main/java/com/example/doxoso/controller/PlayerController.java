@@ -37,6 +37,20 @@ public class PlayerController {
     @Autowired
     private KetQuaService ketQuaService;
 
+    // ===================== SEARCH BY NAME =====================
+    // GET /api/player/search?keyword=lip
+    @GetMapping("/search")
+    public ResponseEntity<List<PlayerSimpleDto>> searchPlayers(@RequestParam String keyword) {
+        List<Player> list = playerService.searchPlayersByName(keyword);
+        List<PlayerSimpleDto> dto = list.stream()
+                .map(p -> new PlayerSimpleDto(p.getId(), p.getName()))
+                .toList();
+        return ResponseEntity.ok(dto);
+    }
+
+    // DTO gọn cho FE (id + name)
+    public record PlayerSimpleDto(Long id, String name) {}
+
     // ===================== CREATE (Client cấp ID) =====================
     @PostMapping
     public ResponseEntity<?> addPlayer(@RequestBody Player player) {

@@ -1,7 +1,5 @@
 package com.example.doxoso.service;
 
-
-
 import com.example.doxoso.model.Player;
 
 import java.util.List;
@@ -22,5 +20,7 @@ public interface IPlayerService {
     Player updateHoaHong(Long id, Double hoaHong);  // cập nhật hoa hồng
 
     Player updateHeSoCachDanh(Long id, Double heSo); // cập nhật hệ số cách đánh
-}
 
+    // 🔍 THÊM MỚI: tìm player theo tên (để FE search)
+    List<Player> searchPlayersByName(String keyword);
+}

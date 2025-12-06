@@ -1,10 +1,10 @@
 package com.example.doxoso.service;
 
 import com.example.doxoso.model.*;
-import com.example.doxoso.repository.KetQuaTichRepository;
 import com.example.doxoso.repository.BetRepository;
-import com.example.doxoso.repository.PlayerRepository;
 import com.example.doxoso.repository.KetQuaNguoiChoiRepository;
+import com.example.doxoso.repository.KetQuaTichRepository;
+import com.example.doxoso.repository.PlayerRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,10 +26,14 @@ public class KetQuaTichService {
     private final PlayerRepository playerRepository;
     private final KetQuaNguoiChoiRepository ketQuaNguoiChoiRepo;
 
-    private final TongTienTrungService tongTienTrungService;
+    private final TongTienTrungService tongTienTrungService;              // hiện giờ ít dùng, giữ lại để sau
     private final TongHopHoaHongLonNhoService tongHopHoaHongLonNhoService;
-    private final TongTienAnThuaMienService tongTienAnThuaMienService;
+    private final TongTienAnThuaMienService tongTienAnThuaMienService;    // hiện chưa dùng, để sẵn
     private final LichQuayXoSoService lichQuayXoSoService;
+    private final KetQuaService ketQuaService;
+
+    // 👉 Tổng tiền đánh theo miền (KHÔNG LỚN/NHỎ, đã nhân số đài)
+    private final TongTienDanhTheoMienService tongTienDanhTheoMienService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -85,7 +89,9 @@ public class KetQuaTichService {
                 case "MIỀN NAM" -> out.get("MN");
                 default -> new HashSet<>();
             };
-            for (String province : list) target.add(canonicalProvince(province));
+            for (String province : list) {
+                target.add(canonicalProvince(province));
+            }
         }
         return out;
     }
@@ -136,86 +142,180 @@ public class KetQuaTichService {
     @Transactional
     public List<KetQuaTich> runAndSaveForPlayer(Long playerId, String playerName, LocalDate ngay) {
 
+        // 0. Lấy tất cả BET của player trong ngày
+        List<Bet> soList = betRepository.findByPlayer_IdAndNgay(playerId, ngay);
+
+        // 0.1 XÓA TOÀN BỘ KQ NGƯỜI CHƠI cũ (mọi miền/đài) của player trong ngày
+        ketQuaNguoiChoiRepo.deleteByPlayerIdAndNgayChoi(playerId, ngay);
+
+        // 0.2 Nếu KHÔNG còn BET nào → xoá luôn KQ TỊCH & trả về rỗng
+        if (soList.isEmpty()) {
+            ketQuaTichRepo.deleteByPlayerIdAndNgay(playerId, ngay);
+            return List.of();
+        }
+
+        // 0.3 Nếu còn BET → DÒ LẠI & LƯU KQ NGƯỜI CHƠI
+        ketQuaService.doKetQua(soList); // bên trong đã gọi ketQuaNguoiChoiService.luuKetQua(bet, dto)
+
+        // 1. Lịch mở thưởng theo miền (để map tên đài -> code MB/MT/MN)
         Map<String, Set<String>> sets = scheduleSets(ngay);
 
-        // (1) Tổng trúng
-        Map<String, BigDecimal> tienTrungByCode = new HashMap<>();
-        TongTienTrungDto trung = tongTienTrungService.tongHopTuDb(playerId, ngay);
+        // 2. Hoa hồng + LỚN/NHỎ (tổng hợp cũ) – giờ chỉ dùng để hỗ trợ lấy tên player nếu cần
+        TongHopHoaHongLonNhoDto hhln =
+                tongHopHoaHongLonNhoService.tongHopMotNgay(playerId, playerName, ngay);
 
-        if (trung != null && trung.getCacMien() != null) {
-            for (TongTienTrungDto.MienDto m : trung.getCacMien()) {
-                String code = toCode(m.getMien(), sets);
-                if (code.equals("MB") || code.equals("MT") || code.equals("MN")) {
-                    tienTrungByCode.merge(code, bd(m.getTongTienMien()), BigDecimal::add);
+        // 3. Tiền LỚN / NHỎ theo miền (từ BET) – CHỈ TIỀN ĐÁNH (để hiển thị @Transient)
+        Map<String, BigDecimal> tienLonByCode = new HashMap<>();
+        Map<String, BigDecimal> tienNhoByCode = new HashMap<>();
+
+        for (Bet so : soList) {
+            BigDecimal stake = parseTienDanh(so.getSoTien());
+            String code = toCode(so.getMien(), sets);
+
+            // Chỉ quan tâm 3 miền chuẩn
+            if (!"MB".equals(code) && !"MT".equals(code) && !"MN".equals(code)) {
+                continue;
+            }
+
+            String cach = normalizeNoAccent(so.getCachDanh());
+            if (cach.contains("LON")) {
+                tienLonByCode.merge(code, stake, BigDecimal::add);
+            }
+            if (cach.contains("NHO")) {
+                tienNhoByCode.merge(code, stake, BigDecimal::add);
+            }
+        }
+
+        // 4. Tiền ĐÁNH THEO MIỀN (KHÔNG LỚN/NHỎ, đã nhân 2/3 đài) từ TongTienDanhTheoMienService
+        Map<String, BigDecimal> tienDanhByCode = new HashMap<>();
+        List<PlayerTongTienDanhTheoMienDto> tongList =
+                tongTienDanhTheoMienService.tinhTongTheoMienTheoNgay(playerId, ngay, ngay);
+
+        if (!tongList.isEmpty()) {
+            PlayerTongTienDanhTheoMienDto dto = tongList.get(0);
+            tienDanhByCode.put("MB",
+                    Optional.ofNullable(dto.getMienBac()).orElse(BigDecimal.ZERO));
+            tienDanhByCode.put("MT",
+                    Optional.ofNullable(dto.getMienTrung()).orElse(BigDecimal.ZERO));
+            tienDanhByCode.put("MN",
+                    Optional.ofNullable(dto.getMienNam()).orElse(BigDecimal.ZERO));
+        }
+
+        // 5. Tên người chơi
+        String resolvedName = resolvePlayerName(playerId, playerName, hhln, soList);
+
+        // 5.1. Hoa hồng % của player – lấy từ bảng players
+        Double hoaHongPlayer = playerRepository.findById(playerId)
+                .map(Player::getHoaHong)
+                .orElse(null);
+
+        // 6. Snapshot KQTICH cũ để giữ id/version/createdAt nếu có
+        List<KetQuaTich> existedRows = ketQuaTichRepo.findByPlayerIdAndNgay(playerId, ngay);
+        Map<String, KetQuaTich> existedByCode = new HashMap<>();
+        for (KetQuaTich r : existedRows) {
+            if (r.getMienCode() != null) {
+                existedByCode.put(r.getMienCode(), r);
+            }
+        }
+
+        // 7. Lấy TOÀN BỘ kết quả người chơi trong ngày (cả trúng lẫn trật)
+        List<KetQuaNguoiChoi> ketQuaTrongNgay =
+                ketQuaNguoiChoiRepo.findByPlayerIdAndNgayChoi(playerId, ngay);
+
+        // 7.1. Tách tiền trúng THƯỜNG + NET LỚN / NHỎ theo miền
+        Map<String, BigDecimal> tienTrungThuongByCode = new HashMap<>();
+        Map<String, BigDecimal> tienLonNetByCode      = new HashMap<>();
+        Map<String, BigDecimal> tienNhoNetByCode      = new HashMap<>();
+
+        if (ketQuaTrongNgay != null) {
+            for (KetQuaNguoiChoi k : ketQuaTrongNgay) {
+                String codeOfRow = toCode(k.getMien(), sets);
+                if (!"MB".equals(codeOfRow) && !"MT".equals(codeOfRow) && !"MN".equals(codeOfRow)) {
+                    continue;
+                }
+
+                String cachNorm = normalizeNoAccent(k.getCachDanh());
+                boolean laLon   = cachNorm.contains("LON");
+                boolean laNho   = cachNorm.contains("NHO");
+                boolean laLonNho = laLon || laNho;
+
+                BigDecimal tienTrung = bd(k.getTienTrung());
+                BigDecimal tienDanh  = bd(k.getTienDanh());
+
+                // 👉 Kèo THƯỜNG
+                if (!laLonNho) {
+                    if (Boolean.TRUE.equals(k.getTrung()) &&
+                            tienTrung.compareTo(BigDecimal.ZERO) > 0) {
+                        tienTrungThuongByCode.merge(codeOfRow, tienTrung, BigDecimal::add);
+                    }
+                    continue;
+                }
+
+                // 👉 Kèo LỚN / NHỎ:
+                //    - trúng  → + tiềnTrung
+                //    - trật   → - tiềnDanh
+                BigDecimal delta;
+                if (Boolean.TRUE.equals(k.getTrung()) &&
+                        tienTrung.compareTo(BigDecimal.ZERO) > 0) {
+                    delta = tienTrung;
+                } else {
+                    delta = tienDanh.negate();
+                }
+
+                if (laLon) {
+                    tienLonNetByCode.merge(codeOfRow, delta, BigDecimal::add);
+                }
+                if (laNho) {
+                    tienNhoNetByCode.merge(codeOfRow, delta, BigDecimal::add);
                 }
             }
         }
 
-        // (2) Hoa hồng + Lớn / Nhỏ
-        TongHopHoaHongLonNhoDto hhln = tongHopHoaHongLonNhoService.tongHopMotNgay(playerId, playerName, ngay);
-
-        Map<String, BigDecimal> hhBy = new HashMap<>();
-        Map<String, BigDecimal> lnBy = new HashMap<>();
-        Map<String, BigDecimal> hhCongLnBy = new HashMap<>();
-
-        if (hhln != null) {
-            hhBy.put("MB", bd(hhln.getTongDaNhanHoaHongMB()));
-            hhBy.put("MT", bd(hhln.getTongDaNhanHoaHongMT()));
-            hhBy.put("MN", bd(hhln.getTongDaNhanHoaHongMN()));
-
-            lnBy.put("MB", bd(hhln.getTienLonNhoMB()));
-            lnBy.put("MT", bd(hhln.getTienLonNhoMT()));
-            lnBy.put("MN", bd(hhln.getTienLonNhoMN()));
-
-            hhCongLnBy.put("MB", bd(hhln.getTongCongMB()));
-            hhCongLnBy.put("MT", bd(hhln.getTongCongMT()));
-            hhCongLnBy.put("MN", bd(hhln.getTongCongMN()));
-        }
-
-        // (3) Tiền đánh
-        Map<String, BigDecimal> tienDanhByCode = new HashMap<>();
-        BigDecimal mb = BigDecimal.ZERO, mt = BigDecimal.ZERO, mn = BigDecimal.ZERO;
-
-        List<Bet> soList = betRepository.findByPlayer_IdAndNgay(playerId, ngay);
-        for (var so : soList) {
-            BigDecimal stake = parseTienDanh(so.getSoTien());
-            String code = toCode(so.getMien(), sets);
-            if (code.equals("MB")) mb = mb.add(stake);
-            if (code.equals("MT")) mt = mt.add(stake);
-            if (code.equals("MN")) mn = mn.add(stake);
-        }
-        tienDanhByCode.put("MB", mb);
-        tienDanhByCode.put("MT", mt);
-        tienDanhByCode.put("MN", mn);
-
-        // Tên người chơi
-        String resolvedName = resolvePlayerName(playerId, playerName, hhln, soList);
-
-        // Snapshot cũ
-        List<KetQuaTich> existedRows = ketQuaTichRepo.findByPlayerIdAndNgay(playerId, ngay);
-        Map<String, KetQuaTich> existedByCode = new HashMap<>();
-        for (KetQuaTich r : existedRows) {
-            if (r.getMienCode() != null) existedByCode.put(r.getMienCode(), r);
-        }
-
-        // 🔵 Lấy TẤT CẢ bản ghi TRÚNG (summary=false) của player trong ngày
-        List<KetQuaNguoiChoi> tatCaTrungTrongNgay =
-                ketQuaNguoiChoiRepo.findChiTietTrungByPlayerAndNgay(playerId, ngay);
-
-        // Build 3 miền
+        // 8. Build 3 miền
         List<KetQuaTich> rows = new ArrayList<>();
 
         for (String code : new String[]{"MB", "MT", "MN"}) {
             String display = display(code);
 
-            BigDecimal tienTrung = tienTrungByCode.getOrDefault(code, BigDecimal.ZERO);
-            BigDecimal tienHH = hhBy.getOrDefault(code, BigDecimal.ZERO);
-            BigDecimal tienDanh = tienDanhByCode.getOrDefault(code, BigDecimal.ZERO);
-            BigDecimal tienLN = lnBy.getOrDefault(code, BigDecimal.ZERO);
-            BigDecimal tienAT = tienTrung.add(tienHH).subtract(tienDanh);
+            // 8.1. Tiền trúng THƯỜNG theo miền (đã tách riêng, không có LỚN/NHỎ)
+            BigDecimal tienTrungThuong = tienTrungThuongByCode.getOrDefault(code, BigDecimal.ZERO);
 
-            // 🔵 Build JSON chi tiết trúng cho riêng miền này
-            String jsonChiTiet = buildChiTietJsonForRegion(tatCaTrungTrongNgay, code, sets);
+            // 8.2. Tiền ĐÁNH theo miền (KHÔNG LỚN/NHỎ, đã nhân số đài)
+            BigDecimal tienDanh = tienDanhByCode.getOrDefault(code, BigDecimal.ZERO);
+
+            // 8.3. Tổng tiền ĐÁNH LỚN / ĐÁNH NHỎ theo miền (TIỀN ĐÁNH – chỉ dùng hiển thị)
+            BigDecimal tienLonDanh = tienLonByCode.getOrDefault(code, BigDecimal.ZERO);
+            BigDecimal tienNhoDanh = tienNhoByCode.getOrDefault(code, BigDecimal.ZERO);
+
+            // 8.4. NET LỚN & NET NHỎ tách riêng
+            BigDecimal tienLonNet = tienLonNetByCode
+                    .getOrDefault(code, BigDecimal.ZERO)
+                    .setScale(2, BigDecimal.ROUND_HALF_UP);
+            BigDecimal tienNhoNet = tienNhoNetByCode
+                    .getOrDefault(code, BigDecimal.ZERO)
+                    .setScale(2, BigDecimal.ROUND_HALF_UP);
+
+            // 8.5. NET LỚN/NHỎ tổng (dùng cho tổng 3 miền) = LỚN + NHỎ
+            BigDecimal tienLonNhoNet = tienLonNet.add(tienNhoNet);
+
+            // 8.6. Tính tiền hoa hồng: tiền đánh (KHÔNG LỚN/NHỎ) × % hoa hồng
+            BigDecimal tienHH = BigDecimal.ZERO;
+            if (hoaHongPlayer != null) {
+                BigDecimal rate = bd(hoaHongPlayer)
+                        .divide(BigDecimal.valueOf(100), 6, BigDecimal.ROUND_HALF_UP);
+                tienHH = tienDanh
+                        .multiply(rate)
+                        .setScale(2, BigDecimal.ROUND_HALF_UP);
+            }
+
+            // 8.7. CÔNG THỨC: Tiền ăn/thua (THƯỜNG) = Tổng TRÚNG THƯỜNG - Tổng HOA HỒNG
+            //       (KHÔNG trừ LỚN/NHỎ, vì đã tính riêng vào tienLonNhoNet)
+            BigDecimal tienAT = tienTrungThuong
+                    .subtract(tienHH)
+                    .setScale(2, BigDecimal.ROUND_HALF_UP);
+
+            // 8.8. JSON chi tiết trúng (CHỈ kèo THƯỜNG, KHÔNG bao gồm LỚN/NHỎ)
+            String jsonChiTiet = buildChiTietJsonForRegion(ketQuaTrongNgay, code, sets);
 
             KetQuaTich entity = KetQuaTich.builder()
                     .playerId(playerId)
@@ -223,15 +323,23 @@ public class KetQuaTichService {
                     .ngay(ngay)
                     .mienCode(code)
                     .mienDisplay(display)
-                    .tienTrung(tienTrung)
-                    .tienHoaHong(tienHH)
-                    .tienLonNho(tienLN)
-                    .tienAnThua(tienAT)
-                    .tienDanh(tienDanh)
+
+                    .tienTrung(tienTrungThuong)                  // ✅ chỉ trúng THƯỜNG
+                    .tienHoaHong(tienHH)                        // ✅ hoa hồng
+                    .tienLonNho(tienLonNhoNet)                  // ✅ NET LỚN/NHỎ (LỚN + NHỎ)
+                    .tienAnThua(tienAT)                         // ✅ ăn/thua THƯỜNG
+
+                    .tienDanh(tienDanh)                         // ✅ tổng tiền đánh (không L/N)
                     .tienDanhDaNhanHoaHong(tienHH)
                     .tienDanhDaNhanHoaHongCongLonNho(
-                            hhCongLnBy.getOrDefault(code, BigDecimal.ZERO))
+                            tienHH.add(tienLonNhoNet)           // thông tin thêm: hoa hồng + NET L/N
+                    )
                     .chiTietTrung(jsonChiTiet)
+
+                    // 👉 NET riêng LỚN / NHỎ (dùng cho FE)
+                    .tienLonNet(tienLonNet)
+                    .tienNhoNet(tienNhoNet)
+
                     .build();
 
             KetQuaTich old = existedByCode.get(code);
@@ -244,7 +352,31 @@ public class KetQuaTichService {
             rows.add(entity);
         }
 
-        return ketQuaTichRepo.saveAll(rows);
+        // 9. Lưu DB
+        List<KetQuaTich> saved = ketQuaTichRepo.saveAll(rows);
+
+        // 🔥 10. GẮN LẠI CÁC FIELD @Transient CHO LIST TRẢ RA
+        for (KetQuaTich kq : saved) {
+            // % hoa hồng player (lấy từ bảng players)
+            kq.setHoaHongPlayer(hoaHongPlayer);
+
+            // TIỀN ĐÁNH LỚN / TIỀN ĐÁNH NHỎ + NET riêng theo miền (chỉ dùng hiển thị, không lưu DB)
+            String code = kq.getMienCode();
+            if (code != null) {
+                kq.setTienLonDanh(tienLonByCode.getOrDefault(code, BigDecimal.ZERO));
+                kq.setTienNhoDanh(tienNhoByCode.getOrDefault(code, BigDecimal.ZERO));
+                kq.setTienLonNet(
+                        tienLonNetByCode.getOrDefault(code, BigDecimal.ZERO)
+                                .setScale(2, BigDecimal.ROUND_HALF_UP)
+                );
+                kq.setTienNhoNet(
+                        tienNhoNetByCode.getOrDefault(code, BigDecimal.ZERO)
+                                .setScale(2, BigDecimal.ROUND_HALF_UP)
+                );
+            }
+        }
+
+        return saved;
     }
 
     // ==================== Helper Methods ======================
@@ -252,16 +384,19 @@ public class KetQuaTichService {
     private String resolvePlayerName(Long playerId, String playerName,
                                      TongHopHoaHongLonNhoDto hhln, List<Bet> soList) {
         String name = playerName;
-        if (isBlank(name) && hhln != null && !isBlank(hhln.getPlayerName()))
+        if (isBlank(name) && hhln != null && !isBlank(hhln.getPlayerName())) {
             name = hhln.getPlayerName();
-        if (isBlank(name))
+        }
+        if (isBlank(name)) {
             name = playerRepository.findById(playerId).map(Player::getName).orElse(null);
-        if (isBlank(name) && !soList.isEmpty() && soList.get(0).getPlayer() != null)
+        }
+        if (isBlank(name) && !soList.isEmpty() && soList.get(0).getPlayer() != null) {
             name = soList.get(0).getPlayer().getName();
+        }
         return name;
     }
 
-    // Build JSON chi tiết cho từng miền
+    // Build JSON chi tiết cho từng miền – CHỈ kèo THƯỜNG, bỏ LỚN/NHỎ
     private String buildChiTietJsonForRegion(List<KetQuaNguoiChoi> all,
                                              String code,
                                              Map<String, Set<String>> sets) {
@@ -273,8 +408,14 @@ public class KetQuaTichService {
                 String codeOfRow = toCode(k.getMien(), sets);
                 if (!code.equals(codeOfRow)) continue;          // khác miền → bỏ
 
-                // chỉ lấy bản trúng (trung = true)
+                // Chỉ lấy bản TRÚNG
                 if (Boolean.FALSE.equals(k.getTrung())) continue;
+
+                // Bỏ LỚN / NHỎ ra khỏi chi tiết trúng (vì đã có hàng riêng)
+                String cachNorm = normalizeNoAccent(k.getCachDanh());
+                if (cachNorm.contains("LON") || cachNorm.contains("NHO")) {
+                    continue;
+                }
 
                 Double tien = k.getTienTrung() != null ? k.getTienTrung() : 0d;
 
@@ -295,10 +436,28 @@ public class KetQuaTichService {
         }
     }
 
+    // parse được cả 3 CHÂN kiểu "10000-20000-30000"
     private static BigDecimal parseTienDanh(String s) {
-        if (s == null) return BigDecimal.ZERO;
+        if (s == null || s.isBlank()) return BigDecimal.ZERO;
+
+        String cleaned = s.replace(",", "").trim();
+
+        if (cleaned.contains("-")) {
+            BigDecimal sum = BigDecimal.ZERO;
+            String[] parts = cleaned.split("-");
+            for (String part : parts) {
+                String p = part.trim();
+                if (p.isEmpty()) continue;
+                try {
+                    sum = sum.add(new BigDecimal(p));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            return sum;
+        }
+
         try {
-            return new BigDecimal(s.replaceAll("[,\\s]", ""));
+            return new BigDecimal(cleaned);
         } catch (Exception e) {
             return BigDecimal.ZERO;
         }

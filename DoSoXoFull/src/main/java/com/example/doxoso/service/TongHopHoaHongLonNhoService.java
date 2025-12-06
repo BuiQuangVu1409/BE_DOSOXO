@@ -1,10 +1,9 @@
 package com.example.doxoso.service;
 
-import com.example.doxoso.model.Bet;
+import com.example.doxoso.model.KetQuaNguoiChoi;
 import com.example.doxoso.model.PlayerTongTienHH;
-import com.example.doxoso.model.Bet;
 import com.example.doxoso.model.TongHopHoaHongLonNhoDto;
-import com.example.doxoso.repository.BetRepository;
+import com.example.doxoso.repository.KetQuaNguoiChoiRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -16,48 +15,64 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TongHopHoaHongLonNhoService {
 
-    private final BetRepository betRepository;
-    private final TongTienHHService tongTienHHService; // đã có sẵn bên bạn
+    private final TongTienHHService tongTienHHService;           // Hoa hồng theo ngày
+    private final KetQuaNguoiChoiRepository ketQuaNguoiChoiRepo; // Kết quả LỚN/NHỎ đã tính ±
 
+    /**
+     * Tổng hợp 1 ngày cho 1 player:
+     *  - Lấy hoa hồng MB/MT/MN từ TongTienHHService
+     *  - Lấy tất cả kết quả LỚN/NHỎ trong ngày từ KetQuaNguoiChoi
+     *      + tienTrung > 0: trúng LỚN/NHỎ (số dương, tính theo công thức)
+     *      + tienTrung < 0: trật LỚN/NHỎ ( âm đúng số tiền đánh )
+     *  - Cộng lại theo miền để ra net LỚN/NHỎ từng miền + tổng cộng
+     */
     public TongHopHoaHongLonNhoDto tongHopMotNgay(Long playerId, String playerName, LocalDate ngay) {
-        // 1) Lấy các số ĐÃ NHÂN HOA HỒNG cho 1 ngày từ TongTienHHService
+
+        // 1) Hoa hồng base (đã "đánh xong" = tiền đánh đã nhân hoa hồng)
         PlayerTongTienHH hh = layHoaHongMotNgay(playerId, ngay);
 
-        BigDecimal mbBase = safe(hh == null ? null : hh.getHoaHongMB());
-        BigDecimal mtBase = safe(hh == null ? null : hh.getHoaHongMT());
-        BigDecimal mnBase = safe(hh == null ? null : hh.getHoaHongMN());
+        BigDecimal mbBase  = safe(hh == null ? null : hh.getHoaHongMB());
+        BigDecimal mtBase  = safe(hh == null ? null : hh.getHoaHongMT());
+        BigDecimal mnBase  = safe(hh == null ? null : hh.getHoaHongMN());
         BigDecimal tongBase = safe(hh == null ? null : hh.getTongDaNhanHoaHong());
 
         if ((playerName == null || playerName.isBlank()) && hh != null) {
             playerName = hh.getPlayerName();
         }
 
-        // 2) Cộng LỚN/NHỎ theo đúng miền từ so_nguoi_choi
-        List<Bet> items = betRepository.findByPlayerIdAndNgay(playerId, ngay);
+        // 2) Lấy tất cả kết quả của player trong ngày, lọc LỚN/NHỎ
+        List<KetQuaNguoiChoi> kqList =
+                ketQuaNguoiChoiRepo.findByPlayerIdAndNgayChoi(playerId, ngay);
 
-        BigDecimal mbLN = BigDecimal.ZERO, mtLN = BigDecimal.ZERO, mnLN = BigDecimal.ZERO;
+        BigDecimal mbLN = BigDecimal.ZERO;
+        BigDecimal mtLN = BigDecimal.ZERO;
+        BigDecimal mnLN = BigDecimal.ZERO;
 
-        for (Bet so : items) {
-            String cd = safeUpper(so.getCachDanh());
-            // chỉ giữ LỚN/NHỎ (có dấu & không dấu)
-            if (!("LỚN".equals(cd) || "LON".equals(cd) || "NHỎ".equals(cd) || "NHO".equals(cd))) continue;
+        for (KetQuaNguoiChoi kq : kqList) {
+            if (!isLonNho(kq.getCachDanh())) continue;
 
-            BigDecimal stake = MoneyParser.parseToBigDecimal(so.getSoTien()); // bạn đang lưu String
+            // ❗ tienTrung cho LỚN/NHỎ ở đây được hiểu là GIÁ TRỊ CÓ DẤU:
+            //   - Trúng  => dương (theo công thức tính tiền trúng LỚN/NHỎ)
+            //   - Trật   => âm   (bằng số tiền đánh, có dấu -)
+            BigDecimal net = safe(kq.getTienTrung());
 
-            switch (mapMien(so.getMien())) {
-                case "MB" -> mbLN = mbLN.add(stake);
-                case "MT" -> mtLN = mtLN.add(stake);
-                case "MN" -> mnLN = mnLN.add(stake);
-                default -> { /* bỏ qua miền khác/không hợp lệ */ }
+            switch (toMienCode(kq.getMien())) {
+                case "MB" -> mbLN = mbLN.add(net);
+                case "MT" -> mtLN = mtLN.add(net);
+                case "MN" -> mnLN = mnLN.add(net);
+                default -> {
+                    // miền không hợp lệ thì bỏ qua
+                }
             }
         }
 
-        // 3) Tổng cộng = base + LỚN/NHỎ
+        // 3) Tổng LỚN/NHỎ toàn bộ (có dấu)
+        BigDecimal tongLN = mbLN.add(mtLN).add(mnLN);
+
+        // 4) Tổng cộng = Hoa hồng + LỚN/NHỎ (đều đã là số ±)
         BigDecimal mbTotal = mbBase.add(mbLN);
         BigDecimal mtTotal = mtBase.add(mtLN);
         BigDecimal mnTotal = mnBase.add(mnLN);
-
-        BigDecimal tongLN  = mbLN.add(mtLN).add(mnLN);
         BigDecimal tongAll = mbTotal.add(mtTotal).add(mnTotal);
 
         return TongHopHoaHongLonNhoDto.builder()
@@ -65,16 +80,19 @@ public class TongHopHoaHongLonNhoService {
                 .playerName(playerName)
                 .ngay(ngay)
 
+                // Hoa hồng đã nhận
                 .tongDaNhanHoaHong(tongBase)
                 .tongDaNhanHoaHongMB(mbBase)
                 .tongDaNhanHoaHongMT(mtBase)
                 .tongDaNhanHoaHongMN(mnBase)
 
+                // LỚN / NHỎ (net ± theo miền)
                 .tienLonNhoMB(mbLN)
                 .tienLonNhoMT(mtLN)
                 .tienLonNhoMN(mnLN)
                 .tongLonNho(tongLN)
 
+                // Tổng cộng (Hoa hồng + LỚN/NHỎ)
                 .tongCongMB(mbTotal)
                 .tongCongMT(mtTotal)
                 .tongCongMN(mnTotal)
@@ -88,26 +106,46 @@ public class TongHopHoaHongLonNhoService {
         return list.isEmpty() ? null : list.get(0);
     }
 
-    // ===== Helpers =====
-    private static BigDecimal safe(BigDecimal n) { return n == null ? BigDecimal.ZERO : n; }
-    private static String safeUpper(String s) { return s == null ? "" : s.trim().toUpperCase(); }
+    // ================= Helpers =================
 
-    private static String mapMien(String raw) {
-        if (raw == null) return "";
-        String s = raw.trim().toUpperCase();
+    private static BigDecimal safe(BigDecimal n) {
+        return n == null ? BigDecimal.ZERO : n;
+    }
+
+    private static BigDecimal safe(Double d) {
+        return d == null ? BigDecimal.ZERO : BigDecimal.valueOf(d);
+    }
+
+    private static String safeUpper(String s) {
+        return s == null ? "" : s.trim().toUpperCase();
+    }
+
+    /** Nhận diện cách đánh LỚN/NHỎ (có hoặc không dấu) */
+    private static boolean isLonNho(String cachDanh) {
+        String u = normalizeCachDanh(cachDanh);
+        return "LỚN".equals(u) || "NHỎ".equals(u);
+    }
+
+    /** Chuẩn hoá cách đánh để nhận diện LỚN/NHỎ ổn định */
+    private static String normalizeCachDanh(String s) {
+        if (s == null) return "";
+        String u = safeUpper(s);
+        // bỏ ký tự không phải chữ/số/khoảng trắng
+        u = u.replaceAll("[^A-Z0-9À-Ỵ\\s]", "");
+        // rút gọn space
+        u = u.replaceAll("\\s+", " ");
+        // map biến thể
+        u = u.replaceAll("\\bLON\\b", "LỚN");
+        u = u.replaceAll("\\bNHO\\b", "NHỎ");
+        return u;
+    }
+
+    /** Map các biến thể tên miền → mã miền ổn định */
+    private static String toMienCode(String raw) {
+        String s = safeUpper(raw);
         if (s.startsWith("MB") || s.contains("BẮC") || s.contains("BAC")) return "MB";
         if (s.startsWith("MT") || s.contains("TRUNG"))                  return "MT";
         if (s.startsWith("MN") || s.contains("NAM"))                    return "MN";
-        return s;
+        return "??";
     }
-
-
-    public final class MoneyParser {
-        public static BigDecimal parseToBigDecimal(String s) {
-            if (s == null || s.isBlank()) return BigDecimal.ZERO;
-            String cleaned = s.replaceAll("[,.\\s]", ""); // bỏ dấu . , khoảng trắng
-            return new BigDecimal(cleaned);
-        }
-    }
-
 }

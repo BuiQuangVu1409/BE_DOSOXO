@@ -127,6 +127,18 @@ public class PlayerService implements IPlayerService {
         return playerRepository.findAll();
     }
 
+    // ========= SEARCH BY NAME =========
+    @Override
+    public List<Player> searchPlayersByName(String keyword) {
+        if (keyword == null) return List.of();
+        String k = keyword.trim();
+        if (k.isEmpty()) return List.of();
+
+        // gọi method trong PlayerRepository
+        return playerRepository.findByNameContainingIgnoreCase(k);
+        // Nếu repo dùng findByPlayerNameContainingIgnoreCase(...) thì sửa lại cho khớp
+    }
+
     // ===== Helpers =====
     private void normalizeForSave(Player p) {
         p.setName(trimOrNull(p.getName()));
