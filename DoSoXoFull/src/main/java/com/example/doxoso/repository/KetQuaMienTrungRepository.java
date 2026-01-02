@@ -1,5 +1,6 @@
 package com.example.doxoso.repository;
 
+import com.example.doxoso.model.KetQuaMienNam;
 import com.example.doxoso.model.KetQuaMienTrung;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -10,5 +11,5 @@ public interface KetQuaMienTrungRepository extends JpaRepository<KetQuaMienTrung
 
     // Lấy toàn bộ kết quả theo ngày
     List<KetQuaMienTrung> findAllByNgay(LocalDate ngay);
-
+    List<KetQuaMienTrung> findByNgayBetween(LocalDate from, LocalDate to);
 }

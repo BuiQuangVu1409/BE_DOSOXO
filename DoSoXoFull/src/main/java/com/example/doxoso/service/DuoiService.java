@@ -7,12 +7,9 @@ import com.example.doxoso.repository.KetQuaMienNamRepository;
 import com.example.doxoso.repository.KetQuaMienTrungRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
 import java.text.Normalizer;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Service

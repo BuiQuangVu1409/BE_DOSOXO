@@ -6,11 +6,11 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
-@Repository
 
+@Repository
 public interface KetQuaMienBacRepository extends JpaRepository<KetQuaMienBac, Long> {
+
     List<KetQuaMienBac> findAllByNgay(LocalDate ngay);
 
-
-
+    List<KetQuaMienBac> findByNgayBetween(LocalDate from, LocalDate to);
 }

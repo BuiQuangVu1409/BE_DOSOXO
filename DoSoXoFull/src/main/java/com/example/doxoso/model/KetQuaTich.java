@@ -39,7 +39,7 @@ public class KetQuaTich {
 
     // ---- Số liệu chính (lưu DB) ----
 
-    // Tiền trúng kèo THƯỜNG (KHÔNG gồm LỚN/NHỎ)
+    // Tiền trúng kèo THƯỜNG (KHÔNG gồm LỚN/NHỎ, KHÔNG gồm CHẴN/LẺ)
     @Column(name = "tien_trung", precision = 18, scale = 2)
     private BigDecimal tienTrung;
 
@@ -71,6 +71,7 @@ public class KetQuaTich {
     private String chiTietTrung;  // JSON string cho FE parse
 
     // ---- Field chỉ dùng hiển thị, không lưu DB ----
+    // =================== LỚN / NHỎ ===================
 
     // Tổng tiền ĐÁNH LỚN / ĐÁNH NHỎ theo miền
     @Transient
@@ -79,12 +80,47 @@ public class KetQuaTich {
     @Transient
     private BigDecimal tienNhoDanh;   // stake NHỎ
 
-    // NET riêng LỚN / NHỎ (trúng - đánh, đã cộng hết kèo)
+    // NET riêng LỚN / NHỎ (trúng -> +tienTrung, trật -> -tienDanh)
     @Transient
     private BigDecimal tienLonNet;    // net LỚN
 
     @Transient
     private BigDecimal tienNhoNet;    // net NHỎ
+
+    // Label LỚN / NHỎ (thường, đầu, đuôi, đầu/đuôi)
+    @Transient
+    private String lonLabel;          // "LỚN", "LỚN ĐẦU", "LỚN ĐUÔI", "LỚN ĐẦU/ĐUÔI"
+
+    @Transient
+    private String nhoLabel;          // "NHỎ", "NHỎ ĐẦU", "NHỎ ĐUÔI", "NHỎ ĐẦU/ĐUÔI"
+
+    // =================== CHẴN / LẺ (MỚI) ===================
+    // Làm y chang LỚN/NHỎ: tách khỏi chiTietTrung, có row riêng ở FE
+
+    // Stake CHẴN / LẺ theo miền (để hiển thị)
+    @Transient
+    private BigDecimal tienChanDanh;
+
+    @Transient
+    private BigDecimal tienLeDanh;
+
+    // Net riêng CHẴN / LẺ (trúng -> +tienTrung, trật -> -tienDanh)
+    @Transient
+    private BigDecimal tienChanNet;
+
+    @Transient
+    private BigDecimal tienLeNet;
+
+    // Net tổng CHẴN/LẺ (dùng cho tổng 3 miền ở FE)
+    @Transient
+    private BigDecimal tienChanLe;
+
+    // Label CHẴN / LẺ (đầu, đuôi, đầu/đuôi)
+    @Transient
+    private String chanLabel; // "CHẴN", "CHẴN ĐẦU", "CHẴN ĐUÔI", "CHẴN ĐẦU/ĐUÔI"
+
+    @Transient
+    private String leLabel;   // "LẺ", "LẺ ĐẦU", "LẺ ĐUÔI", "LẺ ĐẦU/ĐUÔI"
 
     // % hoa hồng của player (lấy từ bảng players)
     @Transient

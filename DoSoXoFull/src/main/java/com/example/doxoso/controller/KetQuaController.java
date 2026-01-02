@@ -154,15 +154,26 @@ public class KetQuaController {
             case "nho"      -> cachDanh = "nhỏ";
             case "2chan"    -> cachDanh = "2 chân";
             case "3chan"    -> cachDanh = "3 chân";
-            case "xuyen2"    -> cachDanh = "xuyên 2";
-            case "xuyen3"    -> cachDanh = "xuyên 3";
-            case "xuyen4"    -> cachDanh = "xuyên 4";
-            case "xuyen5"    -> cachDanh = "xuyên 5";
+            case "xuyen2"   -> cachDanh = "xuyên 2";
+            case "xuyen3"   -> cachDanh = "xuyên 3";
+            case "xuyen4"   -> cachDanh = "xuyên 4";
+            case "xuyen5"   -> cachDanh = "xuyên 5";
+
+            case "chandau"  -> cachDanh = "chẵn đầu";
+            case "chanduoi" -> cachDanh = "chẵn đuôi";
+            case "ledau"    -> cachDanh = "lẻ đầu";
+            case "leduoi"   -> cachDanh = "lẻ đuôi";
+            case "londau"   -> cachDanh = "lớn đầu";
+            case "londuoi"  -> cachDanh = "lớn đuôi";
+            case "nhodau"   -> cachDanh = "nhỏ đầu";
+            case "nhoduoi"  -> cachDanh = "nhỏ đuôi";
+
             default -> throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
                     "cachdanh không hợp lệ: " + cachDanh
             );
         }
+
 
         return ketQuaService.locTheoKetQuaVaCachDanh(ketqua, cachDanh);
     }

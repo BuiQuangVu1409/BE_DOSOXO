@@ -898,7 +898,6 @@
 //}
 package com.example.doxoso.service;
 
-import com.example.doxoso.model.DoiChieuKetQuaDto;
 import com.example.doxoso.model.Player;
 import com.example.doxoso.repository.KetQuaMienBacRepository;
 import com.example.doxoso.repository.KetQuaMienNamRepository;
@@ -1038,15 +1037,19 @@ public class TinhTienService {
                                   String mienTrungDau, String mienTrungDuoi,
                                   double tienDanhCuaDai) {
         double tien = 0.0;
+
+        // Luôn chia đôi tiền cược cho 2 cửa Đầu và Đuôi
+        double tienMotCua = tienDanhCuaDai / 2.0;
+
         if (trungDau && trungDuoi) {
-            double tienDau  = tienDanhCuaDai / 2.0;
-            double tienDuoi = tienDanhCuaDai / 2.0;
-            tien += tinhTienDau(true,  mienTrungDau,  tienDau);
-            tien += tinhTienDuoi(true, mienTrungDuoi, tienDuoi);
+            tien += tinhTienDau(true,  mienTrungDau,  tienMotCua);
+            tien += tinhTienDuoi(true, mienTrungDuoi, tienMotCua);
         } else if (trungDau) {
-            tien = tinhTienDau(true,  mienTrungDau,  tienDanhCuaDai);
+            // Chỉ trúng đầu thì chỉ tính tiền phần Đầu (với 1/2 số tiền cược tổng)
+            tien = tinhTienDau(true,  mienTrungDau,  tienMotCua);
         } else if (trungDuoi) {
-            tien = tinhTienDuoi(true, mienTrungDuoi, tienDanhCuaDai);
+            // Chỉ trúng đuôi thì chỉ tính tiền phần Đuôi (với 1/2 số tiền cược tổng)
+            tien = tinhTienDuoi(true, mienTrungDuoi, tienMotCua);
         }
         return tien;
     }
@@ -1239,6 +1242,47 @@ public class TinhTienService {
             throw new IllegalArgumentException("Tiền đánh không hợp lệ cho 3 CHÂN: " + chuoi);
         }
     }
+    // =================== CHẴN / LẺ (ĐẦU / ĐUÔI) ===================
+
+    // [NEW] lấy hệ số riêng cho CHẴN/LẺ
+// Hiện tại: cho giống LỚN/NHỎ => dùng chung player.getHeSoCachDanh()
+// Sau này muốn khác: đổi 1 chỗ này hoặc thêm field heSoChanLe trong Player
+    private double getHeSoChanLe(Long playerId) {
+        Player player = playerRepository.findById(playerId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy player với id: " + playerId));
+        return player.getHeSoCachDanh();
+    }
+
+    // [NEW] công thức chung (TRÚNG thì nhân hệ số)
+    private double tinhTienChanLeCore(boolean trung, Long playerId, String tienDanhPerDai, int soLanTrung) {
+        if (!trung || soLanTrung <= 0) return 0.0;
+
+        double tien = safeParse(tienDanhPerDai, "tienDanh"); // bạn đã có safeParse()
+        double heSo = getHeSoChanLe(playerId);
+
+        return tien * heSo * soLanTrung;
+    }
+
+    // ====== CHẴN ĐẦU ======
+    public double tinhTienChanDau(boolean trung, Long playerId, String tienDanhPerDai, int soLanTrung) {
+        return tinhTienChanLeCore(trung, playerId, tienDanhPerDai, soLanTrung);
+    }
+
+    // ====== CHẴN ĐUÔI ======
+    public double tinhTienChanDuoi(boolean trung, Long playerId, String tienDanhPerDai, int soLanTrung) {
+        return tinhTienChanLeCore(trung, playerId, tienDanhPerDai, soLanTrung);
+    }
+
+    // ====== LẺ ĐẦU ======
+    public double tinhTienLeDau(boolean trung, Long playerId, String tienDanhPerDai, int soLanTrung) {
+        return tinhTienChanLeCore(trung, playerId, tienDanhPerDai, soLanTrung);
+    }
+
+    // ====== LẺ ĐUÔI ======
+    public double tinhTienLeDuoi(boolean trung, Long playerId, String tienDanhPerDai, int soLanTrung) {
+        return tinhTienChanLeCore(trung, playerId, tienDanhPerDai, soLanTrung);
+    }
+
 
     // =========================================================
     // ==================== LỚN / NHỎ / XUYÊN =================

@@ -1,17 +1,31 @@
 package com.example.doxoso.service;
 
-import com.example.doxoso.model.LichQuayXoSo;
+import com.example.doxoso.model.*;
+import com.example.doxoso.repository.KetQuaMienBacRepository;
+import com.example.doxoso.repository.KetQuaMienTrungRepository;
+import com.example.doxoso.repository.KetQuaMienNamRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.text.Normalizer;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class LichQuayXoSoService {
 
-    // ===== LỊCH QUAY GIỮ NGUYÊN =====
+    // ====== REPOSITORY ĐỂ LẤY LỊCH & BẢNG GIẢI TỪ DB ======
+    @Autowired
+    private KetQuaMienBacRepository bacRepo;
+    @Autowired
+    private KetQuaMienTrungRepository trungRepo;
+    @Autowired
+    private KetQuaMienNamRepository namRepo;
+
+    // ===== LỊCH QUAY GIỮ NGUYÊN (STATIC) =====
     private static final Map<String, List<String>> LICH_MIEN_BAC = Map.of(
             "Thứ Hai", List.of("HÀ NỘI"),
             "Thứ Ba", List.of("HÀ NỘI"),
@@ -56,7 +70,22 @@ public class LichQuayXoSoService {
             Map.entry("DA LAT", "DA LAT")
     );
 
-    // =================== PUBLIC API ===================
+    // ===== THỨ TỰ GIẢI ĐỂ VẼ BẢNG =====
+    private static final LinkedHashMap<String, Integer> PRIZE_ORDER = new LinkedHashMap<>();
+    static {
+        PRIZE_ORDER.put("ĐẶC BIỆT", 1);
+        PRIZE_ORDER.put("DB", 1);
+        PRIZE_ORDER.put("ĐB", 1);
+        PRIZE_ORDER.put("G1", 2);
+        PRIZE_ORDER.put("G2", 3);
+        PRIZE_ORDER.put("G3", 4);
+        PRIZE_ORDER.put("G4", 5);
+        PRIZE_ORDER.put("G5", 6);
+        PRIZE_ORDER.put("G6", 7);
+        PRIZE_ORDER.put("G7", 8);
+    }
+
+    // =================== PUBLIC API CŨ (LỊCH STATIC) ===================
 
     /** Lịch theo ngày (bản gốc có dấu) — dùng cho UI/log. */
     public LichQuayXoSo traCuuTheoNgay(LocalDate ngay) {
@@ -65,8 +94,7 @@ public class LichQuayXoSoService {
         ketQua.put("MIỀN BẮC", LICH_MIEN_BAC.getOrDefault(thu, List.of()));
         ketQua.put("MIỀN TRUNG", LICH_MIEN_TRUNG.getOrDefault(thu, List.of()));
         ketQua.put("MIỀN NAM", LICH_MIEN_NAM.getOrDefault(thu, List.of()));
-        // ✅ Model dùng LocalDate -> truyền LocalDate
-        return new LichQuayXoSo( ngay, thu, ketQua);
+        return new LichQuayXoSo(ngay, thu, ketQua);
     }
 
     /**
@@ -90,10 +118,7 @@ public class LichQuayXoSoService {
         return out;
     }
 
-    /**
-     * Trả về 3 set (MB/MT/MN) đã CHUẨN HÓA KHÔNG DẤU cho TOÀN TUẦN (union tất cả các ngày).
-     * Dùng làm Fallback để không bỏ sót vé nếu user nhập đài khác ngày quay.
-     */
+    /** Toàn tuần, dùng fallback cho dò số. */
     public Map<String, Set<String>> mienSetsNormalizedAllWeek() {
         Map<String, Set<String>> out = new HashMap<>();
         out.put("MB", normalizeUnion(LICH_MIEN_BAC));
@@ -102,13 +127,7 @@ public class LichQuayXoSoService {
         return out;
     }
 
-    /**
-     * Xác định mã miền (MB/MT/MN) từ chuỗi đầu vào theo NGÀY:
-     * 1) Nhận diện "MB/MT/MN" hoặc "Miền ..."
-     * 2) Tra theo lịch NGÀY
-     * 3) Fallback tra theo lịch TOÀN TUẦN
-     * Trả "" nếu vẫn không xác định được.
-     */
+    /** Xác định MB/MT/MN từ tên đài/nguyên miền. */
     public String regionCodeOf(String provinceOrRegion, LocalDate ngay) {
         if (provinceOrRegion == null || provinceOrRegion.isBlank()) return "";
         String u = normalizeNoAccent(provinceOrRegion);
@@ -129,6 +148,189 @@ public class LichQuayXoSoService {
         return matchToken(token, allWeek);
     }
 
+    // =================== API MỚI 1: LỊCH QUAY TỪ DB ===================
+
+    public List<LichQuayXoSo> traCuuLichQuayTheoKetQua(LocalDate from, LocalDate to) {
+        List<KetQuaMienBac> bac   = bacRepo.findByNgayBetween(from, to);
+        List<KetQuaMienTrung> trung = trungRepo.findByNgayBetween(from, to);
+        List<KetQuaMienNam> nam   = namRepo.findByNgayBetween(from, to);
+
+        Map<LocalDate, LichQuayXoSo> mapByDate = new TreeMap<>();
+
+        // ===== GOM MIỀN BẮC =====
+        for (KetQuaMienBac kq : bac) {
+            LocalDate ngay = kq.getNgay();
+            LichQuayXoSo lich = mapByDate.computeIfAbsent(
+                    ngay,
+                    d -> new LichQuayXoSo(d, chuyenDoiThu(d), new HashMap<>())
+            );
+            Map<String, List<String>> ketQua = lich.getKetQua();
+            List<String> dsDai = ketQua.computeIfAbsent("MIỀN BẮC", k -> new ArrayList<>());
+            String tenDai = kq.getTenDai();
+            if (tenDai != null && !dsDai.contains(tenDai)) {
+                dsDai.add(tenDai);
+            }
+        }
+
+        // ===== GOM MIỀN TRUNG =====
+        for (KetQuaMienTrung kq : trung) {
+            LocalDate ngay = kq.getNgay();
+            LichQuayXoSo lich = mapByDate.computeIfAbsent(
+                    ngay,
+                    d -> new LichQuayXoSo(d, chuyenDoiThu(d), new HashMap<>())
+            );
+            Map<String, List<String>> ketQua = lich.getKetQua();
+            List<String> dsDai = ketQua.computeIfAbsent("MIỀN TRUNG", k -> new ArrayList<>());
+            String tenDai = kq.getTenDai();
+            if (tenDai != null && !dsDai.contains(tenDai)) {
+                dsDai.add(tenDai);
+            }
+        }
+
+        // ===== GOM MIỀN NAM =====
+        for (KetQuaMienNam kq : nam) {
+            LocalDate ngay = kq.getNgay();
+            LichQuayXoSo lich = mapByDate.computeIfAbsent(
+                    ngay,
+                    d -> new LichQuayXoSo(d, chuyenDoiThu(d), new HashMap<>())
+            );
+            Map<String, List<String>> ketQua = lich.getKetQua();
+            List<String> dsDai = ketQua.computeIfAbsent("MIỀN NAM", k -> new ArrayList<>());
+            String tenDai = kq.getTenDai();
+            if (tenDai != null && !dsDai.contains(tenDai)) {
+                dsDai.add(tenDai);
+            }
+        }
+
+        // sort tên đài trong từng miền
+        for (LichQuayXoSo lich : mapByDate.values()) {
+            lich.getKetQua().replaceAll((mien, ds) ->
+                    ds.stream().sorted(String::compareToIgnoreCase).collect(Collectors.toList())
+            );
+        }
+
+        return new ArrayList<>(mapByDate.values());
+    }
+
+    // =================== API MỚI 2: BẢNG GIẢI NHƯ ẢNH ===================
+
+    /** Lấy bảng kết quả chi tiết (ĐB, G1..G7) cho 1 ngày + 1 miền. */
+    public LichDoMienDto getBangKetQua(LocalDate ngay, String mienCode) {
+        String mienDisplay = toMienDisplay(mienCode);
+
+        switch (mienCode.toUpperCase()) {
+            case "MB":
+                return buildMienBac(ngay, mienDisplay);
+            case "MT":
+                return buildMienTrung(ngay, mienDisplay);
+            case "MN":
+                return buildMienNam(ngay, mienDisplay);
+            default:
+                throw new IllegalArgumentException("Miền không hợp lệ: " + mienCode);
+        }
+    }
+
+    // --- miền Bắc: 1 đài/ngày ---
+    private LichDoMienDto buildMienBac(LocalDate ngay, String mienDisplay) {
+        List<KetQuaMienBac> list = bacRepo.findAllByNgay(ngay);
+
+        Map<String, List<String>> bangKetQua = groupByPrize(
+                list,
+                KetQuaMienBac::getGiai,
+                KetQuaMienBac::getSoTrung
+        );
+
+        String thu = chuyenDoiThu(ngay);
+        String tenDai = list.isEmpty() ? "HÀ NỘI" : list.get(0).getTenDai();
+
+        BangKetQuaDaiDto dai = BangKetQuaDaiDto.builder()
+                .mien(mienDisplay)
+                .tenDai(tenDai)
+                .ngay(ngay)
+                .thu(thu)
+                .bangKetQua(bangKetQua)
+                .build();
+
+        return LichDoMienDto.builder()
+                .mien(mienDisplay)
+                .ngay(ngay)
+                .thu(thu)
+                .danhSachDai(Collections.singletonList(dai))
+                .build();
+    }
+
+    // --- miền Trung: nhiều đài/ngày ---
+    private LichDoMienDto buildMienTrung(LocalDate ngay, String mienDisplay) {
+        List<KetQuaMienTrung> list = trungRepo.findAllByNgay(ngay);
+        Map<String, List<KetQuaMienTrung>> byDai =
+                list.stream().collect(Collectors.groupingBy(KetQuaMienTrung::getTenDai));
+
+        String thu = chuyenDoiThu(ngay);
+        List<BangKetQuaDaiDto> ds = new ArrayList<>();
+
+        for (Map.Entry<String, List<KetQuaMienTrung>> e : byDai.entrySet()) {
+            String tenDai = e.getKey();
+            Map<String, List<String>> bangKetQua = groupByPrize(
+                    e.getValue(),
+                    KetQuaMienTrung::getGiai,
+                    KetQuaMienTrung::getSoTrung
+            );
+
+            ds.add(BangKetQuaDaiDto.builder()
+                    .mien(mienDisplay)
+                    .tenDai(tenDai)
+                    .ngay(ngay)
+                    .thu(thu)
+                    .bangKetQua(bangKetQua)
+                    .build());
+        }
+
+        ds.sort(Comparator.comparing(BangKetQuaDaiDto::getTenDai));
+
+        return LichDoMienDto.builder()
+                .mien(mienDisplay)
+                .ngay(ngay)
+                .thu(thu)
+                .danhSachDai(ds)
+                .build();
+    }
+
+    // --- miền Nam: nhiều đài/ngày ---
+    private LichDoMienDto buildMienNam(LocalDate ngay, String mienDisplay) {
+        List<KetQuaMienNam> list = namRepo.findAllByNgay(ngay);
+        Map<String, List<KetQuaMienNam>> byDai =
+                list.stream().collect(Collectors.groupingBy(KetQuaMienNam::getTenDai));
+
+        String thu = chuyenDoiThu(ngay);
+        List<BangKetQuaDaiDto> ds = new ArrayList<>();
+
+        for (Map.Entry<String, List<KetQuaMienNam>> e : byDai.entrySet()) {
+            String tenDai = e.getKey();
+            Map<String, List<String>> bangKetQua = groupByPrize(
+                    e.getValue(),
+                    KetQuaMienNam::getGiai,
+                    KetQuaMienNam::getSoTrung
+            );
+
+            ds.add(BangKetQuaDaiDto.builder()
+                    .mien(mienDisplay)
+                    .tenDai(tenDai)
+                    .ngay(ngay)
+                    .thu(thu)
+                    .bangKetQua(bangKetQua)
+                    .build());
+        }
+
+        ds.sort(Comparator.comparing(BangKetQuaDaiDto::getTenDai));
+
+        return LichDoMienDto.builder()
+                .mien(mienDisplay)
+                .ngay(ngay)
+                .thu(thu)
+                .danhSachDai(ds)
+                .build();
+    }
+
     // =================== HELPERS ===================
 
     private String chuyenDoiThu(LocalDate date) {
@@ -144,7 +346,6 @@ public class LichQuayXoSoService {
         };
     }
 
-    /** Chuẩn hoá: bỏ dấu, in hoa, gom khoảng trắng & thay alias để so khớp ổn định. */
     private static String normalizeNoAccent(String s) {
         if (s == null) return "";
         return Normalizer.normalize(s, Normalizer.Form.NFD)
@@ -155,14 +356,12 @@ public class LichQuayXoSoService {
                 .replaceAll("\\s+", " ");
     }
 
-    /** Chuẩn hoá tên đài: áp alias, bỏ tiền tố "TP " để khớp với lịch. */
     private static String canonicalProvince(String raw) {
         String u = normalizeNoAccent(raw);
         String withAlias = ALIASES.getOrDefault(u, u);
         return withAlias.replaceFirst("^TP\\s+", "").trim();
     }
 
-    /** Union & chuẩn hoá một lịch theo tất cả các ngày. */
     private Set<String> normalizeUnion(Map<String, List<String>> lich) {
         Set<String> s = new HashSet<>();
         for (List<String> list : lich.values()) {
@@ -171,7 +370,6 @@ public class LichQuayXoSoService {
         return s;
     }
 
-    /** Khớp token với 3 set MB/MT/MN: match chặt -> match lỏng. */
     private String matchToken(String token, Map<String, Set<String>> sets) {
         if (sets.get("MB").contains(token)) return "MB";
         if (sets.get("MT").contains(token)) return "MT";
@@ -184,5 +382,44 @@ public class LichQuayXoSoService {
             }
         }
         return "";
+    }
+
+    private String toMienDisplay(String mienCode) {
+        switch (mienCode.toUpperCase()) {
+            case "MB": return "MIỀN BẮC";
+            case "MT": return "MIỀN TRUNG";
+            case "MN": return "MIỀN NAM";
+            default:    return mienCode;
+        }
+    }
+
+    private String normalizePrize(String raw) {
+        if (raw == null) return "";
+        String g = raw.trim().toUpperCase();
+        if (g.contains("ĐẶC BIỆT") || g.equals("ĐB") || g.equals("DB")) {
+            return "ĐẶC BIỆT";
+        }
+        return g;
+    }
+
+    private <T> Map<String, List<String>> groupByPrize(
+            List<T> list,
+            Function<T, String> prizeGetter,
+            Function<T, String> numGetter
+    ) {
+        Map<String, List<String>> grouped = list.stream()
+                .collect(Collectors.groupingBy(
+                        item -> normalizePrize(prizeGetter.apply(item)),
+                        Collectors.mapping(numGetter, Collectors.toList())
+                ));
+
+        LinkedHashMap<String, List<String>> ordered = new LinkedHashMap<>();
+        grouped.entrySet().stream()
+                .sorted(Comparator.comparingInt(
+                        e -> PRIZE_ORDER.getOrDefault(e.getKey(), 999)
+                ))
+                .forEachOrdered(e -> ordered.put(e.getKey(), e.getValue()));
+
+        return ordered;
     }
 }

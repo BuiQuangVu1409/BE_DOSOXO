@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.text.Normalizer;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -120,23 +121,40 @@ public class TongHopHoaHongLonNhoService {
         return s == null ? "" : s.trim().toUpperCase();
     }
 
-    /** Nhận diện cách đánh LỚN/NHỎ (có hoặc không dấu) */
+    /**
+     * Nhận diện cách đánh LỚN/NHỎ (bao gồm các biến thể:
+     *  - LỚN, LỚN ĐẦU, LỚN ĐUÔI, LỚN ĐẦU ĐUÔI, LON DAU, LON DUOI...
+     *  - NHỎ, NHỎ ĐẦU, NHỎ ĐUÔI, NHỎ ĐẦU ĐUÔI, NHO DAU, NHO DUOI...
+     */
     private static boolean isLonNho(String cachDanh) {
         String u = normalizeCachDanh(cachDanh);
-        return "LỚN".equals(u) || "NHỎ".equals(u);
+        // chỉ cần chứa "LON" hoặc "NHO" là kèo LỚN/NHỎ
+        return u.contains("LON") || u.contains("NHO");
     }
 
-    /** Chuẩn hoá cách đánh để nhận diện LỚN/NHỎ ổn định */
+    /**
+     * Chuẩn hoá cách đánh:
+     *  - Bỏ dấu tiếng Việt
+     *  - In hoa
+     *  - Bỏ ký tự không phải chữ/số/space
+     *  - Gom khoảng trắng
+     *
+     * Ví dụ:
+     *  "LỚN ĐUÔI"      -> "LON DUOI"
+     *  "nhỏ đầu đuôi"  -> "NHO DAU DUOI"
+     *  "LON-DAU"       -> "LON DAU"
+     */
     private static String normalizeCachDanh(String s) {
         if (s == null) return "";
-        String u = safeUpper(s);
-        // bỏ ký tự không phải chữ/số/khoảng trắng
-        u = u.replaceAll("[^A-Z0-9À-Ỵ\\s]", "");
-        // rút gọn space
+        // Bỏ dấu
+        String noDia = Normalizer.normalize(s, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "");
+        // In hoa + trim
+        String u = noDia.toUpperCase().trim();
+        // Chỉ giữ chữ/số/space, những ký tự khác (.,-/…) thay bằng space
+        u = u.replaceAll("[^A-Z0-9\\s]", " ");
+        // Gom nhiều space về 1
         u = u.replaceAll("\\s+", " ");
-        // map biến thể
-        u = u.replaceAll("\\bLON\\b", "LỚN");
-        u = u.replaceAll("\\bNHO\\b", "NHỎ");
         return u;
     }
 

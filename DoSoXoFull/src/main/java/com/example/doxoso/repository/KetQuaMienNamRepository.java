@@ -9,6 +9,6 @@ import java.util.List;
 @Repository
 public interface KetQuaMienNamRepository extends JpaRepository<KetQuaMienNam, Long> {
     List<KetQuaMienNam> findAllByNgay(LocalDate ngay);
-
+    List<KetQuaMienNam> findByNgayBetween(LocalDate from, LocalDate to);
 
 }
